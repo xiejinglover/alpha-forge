@@ -1,0 +1,4 @@
+interface:
+  display_name: "机器学习量化策略过拟合检验"
+  short_description: "审计机器学习量化策略的过拟合、时间隔离、选择偏差与稳健性"
+  default_prompt: "使用 $strategy-backtest 检查机器学习量化策略的过拟合风险，并输出证据化结论。"
