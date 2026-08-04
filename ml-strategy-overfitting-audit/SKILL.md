@@ -1,5 +1,5 @@
 ---
-name: strategy-backtest
+name: ml-strategy-overfitting-audit
 description: 审计机器学习量化策略的过拟合、时间隔离、因果合法性、随机种子稳定性、特征与容量消融、walk-forward 稳健性、股票池迁移、模型后选择、标签敏感性及特征扰动风险。用于检查训练型量化信号、OOF/OOS 划分、模型或特征筛选、回测研究结论以及 locked final OOS 是否仍具最终确认资格。
 ---
 

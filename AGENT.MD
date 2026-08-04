@@ -10,7 +10,7 @@ quant-skills/
 │   ├── SKILL.md
 │   ├── references/
 │   └── scripts/
-├── strategy-backtest/
+├── ml-strategy-overfitting-audit/
 │   ├── SKILL.md
 │   ├── references/
 │   └── scripts/
