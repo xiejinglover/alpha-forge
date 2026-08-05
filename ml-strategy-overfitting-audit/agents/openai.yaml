@@ -1,4 +1,4 @@
 interface:
   display_name: "机器学习量化策略过拟合检验"
-  short_description: "复用现有量化策略代码执行过拟合实验并生成详细证据报告"
-  default_prompt: "使用 $ml-strategy-overfitting-audit 审计当前策略仓库，复用已有训练和验证代码完成实验并生成详细报告。"
+  short_description: "复用现有策略代码完成过拟合审计并输出结论优先的总分结构报告"
+  default_prompt: "使用 $ml-strategy-overfitting-audit 审计当前策略仓库，复用已有代码完成实验，并生成结论优先的总—分结构报告。"

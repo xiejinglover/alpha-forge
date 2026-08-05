@@ -118,12 +118,23 @@ def complete_manifest():
 
 
 class BuildAuditReportTests(unittest.TestCase):
-    def test_complete_manifest_renders_steps_and_every_module(self):
+    def test_default_report_is_conclusion_first_and_hides_technical_detail(self):
         report = render_report(complete_manifest())
-        self.assertIn("## 逐步骤执行日志", report)
-        self.assertIn("src/train.py::train", report)
+        self.assertIn("## 一、总体结论", report)
+        self.assertIn("## 三、模块结论总览", report)
+        self.assertIn("## 四、各模块详细分析", report)
+        self.assertNotIn("src/train.py::train", report)
+        self.assertNotIn("python -m project.train", report)
+        self.assertNotIn("```json", report)
         for module_id in EXPECTED_MODULES:
-            self.assertIn(f"## {module_id}", report)
+            self.assertIn(f"### {module_id}", report)
+
+    def test_technical_appendix_is_opt_in(self):
+        report = render_report(complete_manifest(), include_technical_appendix=True)
+        self.assertIn("## 技术证据附录", report)
+        self.assertIn("src/train.py::train", report)
+        self.assertIn("python -m project.train", report)
+        self.assertIn("```json", report)
 
     def test_missing_module_is_rejected(self):
         manifest = complete_manifest()
@@ -216,11 +227,15 @@ class BuildAuditReportTests(unittest.TestCase):
             args = ["--input", str(input_path), "--output", str(output_path)]
             self.assertEqual(main(args), 0)
             first_report = output_path.read_text(encoding="utf-8")
-            self.assertIn("## ML-005", first_report)
+            self.assertIn("### ML-005", first_report)
+            self.assertNotIn("技术证据附录", first_report)
             with redirect_stderr(io.StringIO()):
                 self.assertEqual(main(args), 2)
             self.assertEqual(main([*args, "--force"]), 0)
             self.assertEqual(output_path.read_text(encoding="utf-8"), first_report)
+
+            self.assertEqual(main([*args, "--force", "--include-technical-appendix"]), 0)
+            self.assertIn("技术证据附录", output_path.read_text(encoding="utf-8"))
 
 
 if __name__ == "__main__":
