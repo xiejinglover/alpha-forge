@@ -1,4 +1,4 @@
 interface:
   display_name: "策略 N 选优"
-  short_description: "重复随机小组选优并生成调仓日全标的与Top-K投票组合"
-  default_prompt: "Use $strategy-n-select to run a reproducible N-selection study and generate voted Top-K portfolio weights."
+  short_description: "重复随机小组选优、选标重合去相关并生成调仓投票组合"
+  default_prompt: "Use $strategy-n-select to run N-selection, decorrelate winners by development signal overlap, and generate voted Top-K portfolio weights."

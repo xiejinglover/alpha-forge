@@ -104,9 +104,61 @@ class CliEndToEndTests(unittest.TestCase):
         self.assertTrue(manifest["overrides"]["matches"])
         self.assertFalse(manifest["overrides"]["seed"])
 
+        rejected = self.run_command(
+            str(RUNNER),
+            "vote",
+            "--decorrelation-manifest",
+            str(selection_dir / "selection_manifest.json"),
+            "--signals",
+            str(scores),
+            "--output-dir",
+            str(self.root / "rejected-raw-selection"),
+            expected=2,
+        )
+        self.assertIn("Unsupported or unfrozen decorrelation manifest", rejected.stderr)
+
         with (selection_dir / "members.csv").open(encoding="utf-8") as handle:
             members = list(csv.DictReader(handle))
         member_ids = sorted({row["candidate_id"] for row in members})
+        development_signals = self.root / "development_signals.csv"
+        development_assets = {
+            candidate_id: (f"{candidate_id}-A", f"{candidate_id}-B")
+            for candidate_id in member_ids
+        }
+        write_csv(
+            development_signals,
+            ["rebalance_date", "candidate_id", "asset_id"],
+            [
+                {
+                    "rebalance_date": day,
+                    "candidate_id": candidate_id,
+                    "asset_id": asset_id,
+                }
+                for day in ("2024-04-01", "2024-07-01")
+                for candidate_id in member_ids
+                for asset_id in development_assets[candidate_id]
+            ],
+        )
+        decorrelation_dir = self.root / "decorrelation"
+        self.run_command(
+            str(RUNNER),
+            "decorrelate",
+            "--selection-manifest",
+            str(selection_dir / "selection_manifest.json"),
+            "--development-signals",
+            str(development_signals),
+            "--threshold",
+            "0.6",
+            "--output-dir",
+            str(decorrelation_dir),
+        )
+        with (decorrelation_dir / "decorrelated_members.csv").open(encoding="utf-8") as handle:
+            decorrelated_members = list(csv.DictReader(handle))
+        self.assertEqual(
+            {row["candidate_id"] for row in decorrelated_members},
+            set(member_ids),
+        )
+
         signals = self.root / "signals.csv"
         write_csv(
             signals,
@@ -115,18 +167,19 @@ class CliEndToEndTests(unittest.TestCase):
                 {
                     "rebalance_date": day,
                     "candidate_id": candidate_id,
-                    "asset_id": "A" if candidate_id == "S1" else "B",
+                    "asset_id": asset_id,
                 }
                 for day in ("2025-01-06", "2025-02-03")
                 for candidate_id in member_ids
+                for asset_id in (("A", "C") if candidate_id == "S1" else ("B",))
             ],
         )
         portfolio_dir = self.root / "portfolio"
         self.run_command(
             str(RUNNER),
             "vote",
-            "--selection-manifest",
-            str(selection_dir / "selection_manifest.json"),
+            "--decorrelation-manifest",
+            str(decorrelation_dir / "decorrelation_manifest.json"),
             "--signals",
             str(signals),
             "--top-k",
@@ -139,22 +192,27 @@ class CliEndToEndTests(unittest.TestCase):
         self.assertTrue(targets)
         self.assertEqual({row["member_vote_mode"] for row in targets}, {"slot_weighted", "unique_equal"})
         self.assertEqual({row["selection_label"] for row in targets}, {"all", "top_1", "top_3", "top_5"})
+        with (portfolio_dir / "member_votes.csv").open(encoding="utf-8") as handle:
+            member_votes = list(csv.DictReader(handle))
+        s1_rows = [row for row in member_votes if row["candidate_id"] == "S1"]
+        if s1_rows:
+            self.assertTrue(all(row["member_asset_count"] == "2" for row in s1_rows))
 
-        with (selection_dir / "members.csv").open("a", encoding="utf-8") as handle:
+        with (decorrelation_dir / "decorrelated_members.csv").open("a", encoding="utf-8") as handle:
             handle.write("\n")
         failed_dir = self.root / "should-not-exist"
         result = self.run_command(
             str(RUNNER),
             "vote",
-            "--selection-manifest",
-            str(selection_dir / "selection_manifest.json"),
+            "--decorrelation-manifest",
+            str(decorrelation_dir / "decorrelation_manifest.json"),
             "--signals",
             str(signals),
             "--output-dir",
             str(failed_dir),
             expected=2,
         )
-        self.assertIn("Frozen selection artifact changed", result.stderr)
+        self.assertIn("Frozen decorrelation artifact changed", result.stderr)
 
 
 if __name__ == "__main__":

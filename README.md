@@ -5,7 +5,7 @@ Alpha Forge 是一个面向量化研究的 Codex Skills 仓库。每个 Skill �
 当前已提供：
 
 - [`ml-strategy-overfitting-audit`](ml-strategy-overfitting-audit/SKILL.md)：机器学习量化策略过拟合检验。
-- [`strategy-n-select`](strategy-n-select/SKILL.md)：重复随机小组 N 选优、赢家投票和调仓日全标的/Top-K 组合生成。
+- [`strategy-n-select`](strategy-n-select/SKILL.md)：重复随机小组 N 选优、开发期选标重合去相关和调仓日全标的/Top-K 投票组合生成。
 
 ## 设计原则
 
