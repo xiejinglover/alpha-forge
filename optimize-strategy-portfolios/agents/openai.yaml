@@ -1,0 +1,4 @@
+interface:
+  display_name: "策略组合优化"
+  short_description: "候选策略质量保护、低Beta与滚动冻结组合优化研究"
+  default_prompt: "Use $optimize-strategy-portfolios to build and audit frozen rolling equal-sleeve portfolios from existing candidate strategy returns."

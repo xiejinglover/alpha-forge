@@ -6,6 +6,7 @@ Alpha Forge 是一个面向量化研究的 Codex Skills 仓库。每个 Skill �
 
 - [`ml-strategy-overfitting-audit`](ml-strategy-overfitting-audit/SKILL.md)：机器学习量化策略过拟合检验。
 - [`strategy-n-select`](strategy-n-select/SKILL.md)：重复随机小组 N 选优、开发期选标重合去相关和调仓日全标的/Top-K 投票组合生成。
+- [`optimize-strategy-portfolios`](optimize-strategy-portfolios/SKILL.md)：对已有候选策略账户执行质量保护、低 Beta、残差去相关、风险簇约束与滚动冻结验证。
 
 ## 设计原则
 
@@ -64,6 +65,14 @@ cp -R alpha-forge/ml-strategy-overfitting-audit ~/.codex/skills/
 先确认开发期和留出集，再分别生成胜出次数加权与唯一策略等权的调仓日投票组合。
 ```
 
+对已有正式扣费候选账户进行组合风险优化时：
+
+```text
+使用 $optimize-strategy-portfolios 对候选策略运行质量保护后的低 Beta N 敏感性、残差去相关和滚动冻结验证。
+```
+
+三个 Skill 分工如下：`strategy-n-select` 负责候选锦标赛与股票投票；`optimize-strategy-portfolios` 负责已有候选账户的线性袖套风险优化；`ml-strategy-overfitting-audit` 负责模型层的过拟合审计。
+
 ## 检验模块
 
 | 模块 | 检验内容 | 角色 |
@@ -102,7 +111,7 @@ python3 ml-strategy-overfitting-audit/scripts/build_audit_report.py \
 
 ## 脚本
 
-脚本均只依赖 Python 标准库。它们不替代策略训练或回测框架，只用于审计现有实验产物。
+脚本不替代策略训练或交易回测框架。ML 审计与 N 选优脚本只依赖 Python 标准库；策略组合优化脚本额外依赖 NumPy。
 
 | 脚本 | 用途 |
 |---|---|
@@ -110,6 +119,8 @@ python3 ml-strategy-overfitting-audit/scripts/build_audit_report.py \
 | `compute_stability_metrics.py` | 计算 IC、RankIC、Top-K Jaccard、排序相关、预测漂移和信号翻转 |
 | `audit_model_selection.py` | 审计 trial 分母、容量族、训练—验证 gap、人工覆盖和后选择 |
 | `build_audit_report.py` | 验证审计结果完整性并生成总—分结构 Markdown 报告 |
+| `run_portfolio_optimization.py` | 运行质量保护、多类 Beta、等权组合和滚动冻结评估 |
+| `build_portfolio_report.py` | 验证冻结产物哈希并重建组合审计报告 |
 
 查看任一脚本的输入字段和命令行选项：
 
@@ -123,6 +134,12 @@ python3 ml-strategy-overfitting-audit/scripts/<script>.py --help
 alpha-forge/
 ├── AGENT.MD
 ├── README.md
+├── optimize-strategy-portfolios/
+│   ├── SKILL.md
+│   ├── agents/openai.yaml
+│   ├── references/
+│   └── scripts/
+├── strategy-n-select/
 └── ml-strategy-overfitting-audit/
     ├── SKILL.md
     ├── agents/
@@ -142,6 +159,14 @@ alpha-forge/
 ```bash
 python3 -m unittest discover \
   -s ml-strategy-overfitting-audit/scripts/tests \
+  -v
+
+python3 -m unittest discover \
+  -s strategy-n-select/scripts/tests \
+  -v
+
+python3 -m unittest discover \
+  -s optimize-strategy-portfolios/scripts/tests \
   -v
 ```
 
