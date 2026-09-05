@@ -8,7 +8,7 @@ import hashlib
 import itertools
 import json
 import math
-from collections import Counter, defaultdict
+from collections import defaultdict
 from datetime import date, datetime
 from pathlib import Path
 from typing import Any, Iterable, Mapping, Sequence
@@ -102,7 +102,7 @@ def read_return_panel(path: Path, id_field: str) -> dict[str, dict[date, float]]
 def read_diagnostics(path: Path) -> dict[tuple[str, str], dict[str, Any]]:
     result: dict[tuple[str, str], dict[str, Any]] = {}
     required = {
-        "deployment_id", "family_id", "candidate_id", "eligible", "quality_score",
+        "deployment_id", "family_id", "candidate_id", "eligible", "robust_quality_score",
         "trading_activity_ok", "coverage_complete", "positive_residual_periods",
         "residual_periods_total", "estimation_start", "estimation_end", "as_of",
         "rule_id", "source_artifact_path", "source_artifact_sha256",
@@ -125,7 +125,9 @@ def read_diagnostics(path: Path) -> dict[tuple[str, str], dict[str, Any]]:
             result[key] = {
                 "eligible": parse_bool(row["eligible"], f"{path}:{line}:eligible"),
                 "family_id": family_id,
-                "quality_score": finite_float(row["quality_score"], f"{path}:{line}:quality_score"),
+                "robust_quality_score": finite_float(
+                    row["robust_quality_score"], f"{path}:{line}:robust_quality_score"
+                ),
                 "trading_activity_ok": parse_bool(
                     row["trading_activity_ok"], f"{path}:{line}:trading_activity_ok"
                 ),
@@ -175,39 +177,6 @@ def read_controls(path: Path | None) -> tuple[list[str], dict[date, list[float]]
             raise ContractError(f"{path}: incomplete factor set on {day.isoformat()}")
         controls[day] = [values[factor] for factor in ordered]
     return ordered, controls
-
-
-def read_clusters(path: Path | None) -> dict[tuple[str, str], dict[str, Any]]:
-    if path is None:
-        return {}
-    result: dict[tuple[str, str], dict[str, Any]] = {}
-    with path.open(encoding="utf-8", newline="") as handle:
-        reader = csv.DictReader(handle)
-        require_columns(reader, {
-            "deployment_id", "candidate_id", "cluster_id", "estimation_start", "estimation_end",
-            "as_of", "rule_id", "source_artifact_path", "source_artifact_sha256",
-        }, path)
-        for line, row in enumerate(reader, 2):
-            key = (row["deployment_id"].strip(), row["candidate_id"].strip())
-            cluster = row["cluster_id"].strip()
-            if not all(key) or not cluster or key in result:
-                raise ContractError(f"{path}:{line} blank or duplicate cluster row")
-            rule_id = row["rule_id"].strip()
-            source_hash = row["source_artifact_sha256"].strip()
-            if not rule_id or not row["source_artifact_path"].strip() or not is_sha256(source_hash):
-                raise ContractError(f"{path}:{line} missing cluster rule_id or 64-character source hash")
-            result[key] = {
-                "cluster_id": cluster,
-                "estimation_start": parse_date(row["estimation_start"], f"{path}:{line}:estimation_start"),
-                "estimation_end": parse_date(row["estimation_end"], f"{path}:{line}:estimation_end"),
-                "as_of": parse_date(row["as_of"], f"{path}:{line}:as_of"),
-                "rule_id": rule_id,
-                "source_artifact_path": (path.parent / row["source_artifact_path"]).resolve()
-                if not Path(row["source_artifact_path"]).is_absolute()
-                else Path(row["source_artifact_path"]).resolve(),
-                "source_artifact_sha256": source_hash,
-            }
-    return result
 
 
 def read_prior_ledger(path: Path | None) -> list[dict[str, Any]]:
@@ -279,36 +248,29 @@ def load_selection_spec(path: Path | None) -> dict[str, Any] | None:
     return value
 
 
-def read_signals(path: Path | None) -> dict[str, dict[date, set[str]]]:
-    if path is None:
-        return {}
-    result: dict[str, dict[date, set[str]]] = defaultdict(lambda: defaultdict(set))
-    seen: set[tuple[date, str, str]] = set()
-    with path.open(encoding="utf-8", newline="") as handle:
-        reader = csv.DictReader(handle)
-        require_columns(reader, {"date", "candidate_id", "asset_id"}, path)
-        for line, row in enumerate(reader, 2):
-            day = parse_date(row["date"], f"{path}:{line}:date")
-            candidate = row["candidate_id"].strip()
-            asset = row["asset_id"].strip()
-            key = (day, candidate, asset)
-            if not candidate or not asset or key in seen:
-                raise ContractError(f"{path}:{line} blank or duplicate signal row")
-            seen.add(key)
-            result[candidate][day].add(asset)
-    return {candidate: dict(days) for candidate, days in result.items()}
-
-
 def load_study(path: Path) -> dict[str, Any]:
     try:
         study = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
         raise ContractError(f"Cannot read study JSON {path}: {exc}") from exc
-    for field in ("family_id", "annualization", "quality_top_k", "n_values", "hac_lags", "deployments"):
+    for field in (
+        "family_id", "annualization", "quality_top_k", "quality_method",
+        "n_values", "hac_lags", "deployments",
+    ):
         if field not in study:
             raise ContractError(f"study missing {field}")
     if int(study["annualization"]) <= 0 or int(study["quality_top_k"]) <= 0:
         raise ContractError("annualization and quality_top_k must be positive")
+    if int(study["quality_top_k"]) != 100:
+        raise ContractError("EMA20 canonical workflow requires quality_top_k=100")
+    if study["quality_method"] != "ema20_robust_specific_quality_v1":
+        raise ContractError(
+            "quality_method must be ema20_robust_specific_quality_v1; raw Sharpe is not allowed"
+        )
+    if study.get("decorrelation", {}).get("enabled"):
+        raise ContractError(
+            "decorrelation is not part of the EMA20 canonical workflow; run it as a separate experiment"
+        )
     if int(study["hac_lags"]) < 0:
         raise ContractError("hac_lags must be non-negative")
     n_values = study["n_values"]
@@ -490,25 +452,6 @@ def compound_return(returns: Sequence[float]) -> float:
     return result - 1.0
 
 
-def percentile_scores(rows: Sequence[Mapping[str, Any]], keys: Sequence[str]) -> dict[str, float]:
-    scores: dict[str, list[float]] = defaultdict(list)
-    for key in keys:
-        values = sorted((float(row[key]), str(row["candidate_id"])) for row in rows)
-        if any(not math.isfinite(value) for value, _ in values):
-            raise ContractError(f"cannot rank non-finite {key}")
-        n = len(values)
-        start = 0
-        while start < n:
-            end = start + 1
-            while end < n and values[end][0] == values[start][0]:
-                end += 1
-            percentile = ((start + end - 1) / 2) / max(n - 1, 1)
-            for _, candidate in values[start:end]:
-                scores[candidate].append(percentile)
-            start = end
-    return {candidate: max(parts) for candidate, parts in scores.items()}
-
-
 def pearson(a: Sequence[float], b: Sequence[float]) -> float:
     if len(a) < 2 or len(a) != len(b):
         return math.nan
@@ -532,23 +475,6 @@ def median(values: Sequence[float]) -> float:
     return float(np.median(np.asarray(values, dtype=float))) if values else math.nan
 
 
-def mean_signal_jaccard(
-    first: str, second: str, signals: Mapping[str, Mapping[date, set[str]]], start: date, end: date
-) -> float:
-    if first not in signals or second not in signals:
-        return math.nan
-    days = sorted(
-        day for day in set(signals[first]) & set(signals[second]) if start <= day <= end
-    )
-    if not days:
-        return math.nan
-    values = []
-    for day in days:
-        union = signals[first][day] | signals[second][day]
-        values.append(len(signals[first][day] & signals[second][day]) / len(union) if union else 1.0)
-    return sum(values) / len(values)
-
-
 def portfolio_series(members: Sequence[str], panel: Mapping[str, Mapping[date, float]], days: Sequence[date]) -> list[float]:
     if not members:
         raise ContractError("portfolio has no members")
@@ -563,60 +489,8 @@ def portfolio_series(members: Sequence[str], panel: Mapping[str, Mapping[date, f
 def select_fixed_schemes(quality_pool: Sequence[Mapping[str, Any]], n: int) -> dict[str, list[str]]:
     if len(quality_pool) < n:
         return {}
-    quality = sorted(quality_pool, key=lambda row: (-float(row["quality_score"]), str(row["candidate_id"])))
     low_beta = sorted(quality_pool, key=lambda row: (float(row["ordinary_beta"]), str(row["candidate_id"])))
-    robust_scores = percentile_scores(quality_pool, RISK_KEYS)
-    robust = sorted(quality_pool, key=lambda row: (robust_scores[str(row["candidate_id"])], str(row["candidate_id"])))
-    return {
-        "QUALITY_EQ": [str(row["candidate_id"]) for row in quality[:n]],
-        "LOW_BETA_EQ": [str(row["candidate_id"]) for row in low_beta[:n]],
-        "ROBUST_BETA_EQ": [str(row["candidate_id"]) for row in robust[:n]],
-    }
-
-
-def enumerate_decorrelated(
-    pool: Sequence[Mapping[str, Any]], n: int, residuals: Mapping[str, Sequence[float]],
-    beta_caps: Mapping[str, float], max_combinations: int,
-    clusters: Mapping[str, str] | None = None, minimum_clusters: int | None = None,
-    max_per_cluster: int | None = None,
-) -> tuple[list[str] | None, str | None, int]:
-    candidates = sorted(str(row["candidate_id"]) for row in pool)
-    lookup = {str(row["candidate_id"]): row for row in pool}
-    count = math.comb(len(candidates), n) if len(candidates) >= n else 0
-    if count == 0:
-        return None, "insufficient_candidates", count
-    if count > max_combinations:
-        return None, "combination_limit_exceeded", count
-    best: tuple[Any, ...] | None = None
-    best_members: list[str] | None = None
-    for combo in itertools.combinations(candidates, n):
-        if clusters is not None:
-            labels = [clusters.get(candidate) for candidate in combo]
-            if any(label is None for label in labels):
-                continue
-            counts = Counter(labels)
-            if minimum_clusters is not None and len(counts) < minimum_clusters:
-                continue
-            if max_per_cluster is not None and max(counts.values()) > max_per_cluster:
-                continue
-        combo_betas = {
-            key: sum(float(lookup[candidate][key]) for candidate in combo) / n for key in RISK_KEYS
-        }
-        if any(combo_betas[key] > float(beta_caps[key]) + 1e-12 for key in RISK_KEYS):
-            continue
-        correlations = pairwise_values(combo, residuals)
-        if len(correlations) != n * (n - 1) // 2:
-            continue
-        objective = (
-            median(correlations), max(correlations), combo_betas["tail_10_beta"],
-            combo_betas["ordinary_beta"], combo,
-        )
-        if best is None or objective < best:
-            best = objective
-            best_members = list(combo)
-    if best_members is None:
-        return None, "no_feasible_combination", count
-    return best_members, None, count
+    return {"LOW_BETA_EQ": [str(row["candidate_id"]) for row in low_beta[:n]]}
 
 
 def json_value(value: Any) -> Any:

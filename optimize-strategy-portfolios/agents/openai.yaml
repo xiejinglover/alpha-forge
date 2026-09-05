@@ -1,4 +1,4 @@
 interface:
-  display_name: "策略组合优化"
-  short_description: "候选策略质量保护、低Beta与滚动冻结组合优化研究"
-  default_prompt: "Use $optimize-strategy-portfolios to build and audit frozen rolling equal-sleeve portfolios from existing candidate strategy returns."
+  display_name: "EMA20同口径低Beta袖套"
+  short_description: "稳健质量Top100后按普通Beta选N并滚动冻结等权"
+  default_prompt: "Use $optimize-strategy-portfolios to reproduce the EMA20 canonical workflow only: robust residual-quality Top100, ordinary-beta ascending selection, frozen N-member equal linear sleeves, and next-period evaluation. Do not substitute raw Sharpe or add voting, robust-beta, decorrelation, or cluster branches unless separately requested."

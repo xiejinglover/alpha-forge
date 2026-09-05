@@ -91,73 +91,12 @@ def render_report(manifest: dict[str, Any], root: Path) -> str:
             f"{_pct(row['residual_alpha'])} |"
         )
 
-    lines.extend(["", "## 低 Beta 相对质量对照", ""])
-    lookup = {(row["deployment_id"], row["scheme"], row["n"]): row for row in evaluation}
-    comparisons = []
-    for key, low in sorted(lookup.items()):
-        deployment_id, scheme, n = key
-        if scheme != "LOW_BETA_EQ":
-            continue
-        quality = lookup.get((deployment_id, "QUALITY_EQ", n))
-        if quality is None:
-            continue
-        quality_return = _number(quality["annual_return"])
-        low_return = _number(low["annual_return"])
-        retention = low_return / quality_return if quality_return > 0 else math.nan
-        ordinary_reduction = (
-            1 - _number(low["ordinary_beta"]) / _number(quality["ordinary_beta"])
-            if _number(quality["ordinary_beta"]) != 0 else math.nan
-        )
-        downside_reduction = (
-            1 - _number(low["downside_beta"]) / _number(quality["downside_beta"])
-            if _number(quality["downside_beta"]) != 0 else math.nan
-        )
-        tail_reduction = (
-            1 - _number(low["tail_10_beta"]) / _number(quality["tail_10_beta"])
-            if _number(quality["tail_10_beta"]) != 0 else math.nan
-        )
-        sharpe_delta = _number(low["sharpe"]) - _number(quality["sharpe"])
-        drawdown_delta = _number(low["max_drawdown"]) - _number(quality["max_drawdown"])
-        if low_return <= 0 or _number(low["residual_alpha"]) <= 0:
-            reading = "Beta低但Alpha/收益不足"
-        elif ordinary_reduction > 0 and downside_reduction >= 0 and tail_reduction >= 0:
-            reading = "三类暴露同向下降"
-        elif ordinary_reduction > 0:
-            reading = "仅部分风险改善"
-        else:
-            reading = "普通Beta未改善"
-        comparisons.append((
-            deployment_id, n, retention, ordinary_reduction, sharpe_delta, drawdown_delta,
-            downside_reduction, tail_reduction, reading, _number(low["residual_alpha"]),
-        ))
-    if comparisons:
-        lines.extend([
-            "| 批次 | N | 收益保留率 | Sharpe差 | 回撤差 | 普通Beta降幅 | 下行Beta降幅 | 尾部10%Beta降幅 | 判读 |",
-            "|---|---:|---:|---:|---:|---:|---:|---:|---|",
-        ])
-        for deployment_id, n, retention, reduction, sharpe_delta, drawdown_delta, downside_reduction, tail_reduction, reading, _ in comparisons:
-            retention_text = "—" if not math.isfinite(retention) else f"{retention:.2%}"
-            reduction_text = "—" if not math.isfinite(reduction) else f"{reduction:.2%}"
-            downside_text = "—" if not math.isfinite(downside_reduction) else f"{downside_reduction:.2%}"
-            tail_text = "—" if not math.isfinite(tail_reduction) else f"{tail_reduction:.2%}"
-            lines.append(
-                f"| {deployment_id} | {n} | {retention_text} | {sharpe_delta:.3f} | "
-                f"{drawdown_delta:.2%} | {reduction_text} | {downside_text} | {tail_text} | {reading} |"
-            )
-        rolling_comparisons = [row for row in comparisons if row[0] != "ALL_ROLLING"]
-        aligned = sum(
-            1 for row in rolling_comparisons
-            if row[3] > 0 and row[6] >= 0 and row[7] >= 0
-        )
-        positive = sum(1 for row in rolling_comparisons if "Alpha/收益不足" not in row[8])
-        lines.extend([
-            "",
-            f"- 逐期/N配对数：{len(rolling_comparisons)}；普通、下行和尾部Beta同向不恶化：{aligned}。",
-            f"- 低Beta组合在冻结评估期保持正收益且正残差Alpha：{positive}/{len(rolling_comparisons)}。",
-            "- 若多数配置不满足同向风险改善或正Alpha，应优先解释为暴露转移、弱交易或Alpha消失，不得只根据普通Beta宣称优化成功。",
-        ])
-    else:
-        lines.append("无可配对的 `QUALITY_EQ` 与 `LOW_BETA_EQ` 评估结果。")
+    lines.extend([
+        "", "## N 敏感性判读", "",
+        "- 所有 N 均来自同一 `robust_quality_score` Top100 内的普通 Beta 排名嵌套前缀。",
+        "- 报告同时展示逐期和 `ALL_ROLLING`；不根据已消费历史结果自动挑选最优 N。",
+        "- 普通 Beta 下降若伴随收益、控制后 Alpha 或交易活动度消失，应判为弱 Alpha，不得宣称分散成功。",
+    ])
 
     lines.extend([
         "", "## 候选分母与不可行项", "",
@@ -183,23 +122,6 @@ def render_report(manifest: dict[str, Any], root: Path) -> str:
     ])
     verdict = "diagnostic_only" if consumed_only else "research_candidate_pending_forward"
     rules = manifest["study"].get("decision_rules")
-    if (
-        not consumed_only and rules and current_ledger
-        and all(row["evidence_role"] == "forward_monitoring" for row in current_ledger)
-    ):
-        assessable = [row for row in comparisons if row[0] != "ALL_ROLLING"]
-        passed = [
-            row for row in assessable
-            if row[2] >= float(rules["minimum_return_retention"])
-            and row[4] >= float(rules["minimum_sharpe_delta"])
-            and row[5] >= -float(rules["maximum_drawdown_worsening"])
-            and row[3] >= float(rules["minimum_ordinary_beta_reduction"])
-            and row[6] >= float(rules["minimum_downside_beta_reduction"])
-            and row[7] >= float(rules["minimum_tail10_beta_reduction"])
-            and row[9] >= float(rules["minimum_residual_alpha"])
-        ]
-        if assessable and len(passed) / len(assessable) >= float(rules["minimum_config_pass_rate"]):
-            verdict = "forward_supported"
     return "\n".join(lines).replace("__VERDICT__", verdict)
 
 

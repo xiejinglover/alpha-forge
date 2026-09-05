@@ -12,7 +12,6 @@ sys.path.insert(0, str(SCRIPT_DIR))
 
 from portfolio_optimization_core import (
     ContractError,
-    enumerate_decorrelated,
     load_study,
     performance_metrics,
     risk_metrics,
@@ -46,41 +45,22 @@ class CoreTests(unittest.TestCase):
         self.assertLess(metrics["ordinary_beta"], 0.1)
         self.assertLess(metrics["residual_alpha"], 0)
 
-    def test_stable_selection_and_robust_rank(self) -> None:
+    def test_stable_low_beta_selection_uses_beta_then_id_only(self) -> None:
         rows = [
-            {"candidate_id": "B", "quality_score": 2, "ordinary_beta": .2, "controlled_beta": .2, "downside_beta": .2, "tail_10_beta": .2},
-            {"candidate_id": "A", "quality_score": 2, "ordinary_beta": .2, "controlled_beta": .1, "downside_beta": .1, "tail_10_beta": .1},
-            {"candidate_id": "C", "quality_score": 1, "ordinary_beta": .1, "controlled_beta": .8, "downside_beta": .8, "tail_10_beta": .8},
+            {"candidate_id": "B", "robust_quality_score": 2, "ordinary_beta": .2},
+            {"candidate_id": "A", "robust_quality_score": 2, "ordinary_beta": .2},
+            {"candidate_id": "C", "robust_quality_score": 1, "ordinary_beta": .1},
         ]
         selected = select_fixed_schemes(rows, 2)
-        self.assertEqual(selected["QUALITY_EQ"], ["A", "B"])
+        self.assertEqual(set(selected), {"LOW_BETA_EQ"})
         self.assertEqual(selected["LOW_BETA_EQ"], ["C", "A"])
-        self.assertEqual(selected["ROBUST_BETA_EQ"], ["A", "B"])
-
-    def test_decorrelation_respects_beta_and_cluster_caps(self) -> None:
-        rows = [
-            {"candidate_id": "A", "ordinary_beta": .2, "controlled_beta": .2, "downside_beta": .2, "tail_10_beta": .2},
-            {"candidate_id": "B", "ordinary_beta": .3, "controlled_beta": .3, "downside_beta": .3, "tail_10_beta": .3},
-            {"candidate_id": "C", "ordinary_beta": .25, "controlled_beta": .25, "downside_beta": .25, "tail_10_beta": .25},
-        ]
-        residuals = {"A": [1, -1, 1, -1], "B": [1, 1, -1, -1], "C": [-1, 1, -1, 1]}
-        caps = {key: .3 for key in ("ordinary_beta", "controlled_beta", "downside_beta", "tail_10_beta")}
-        members, reason, count = enumerate_decorrelated(
-            rows, 2, residuals, caps, 10, clusters={"A": "1", "B": "1", "C": "2"},
-            minimum_clusters=2, max_per_cluster=1,
-        )
-        self.assertIsNone(reason)
-        self.assertEqual(count, 3)
-        self.assertEqual(members, ["A", "C"])
-        members, reason, _ = enumerate_decorrelated(rows, 2, residuals, caps, 2)
-        self.assertIsNone(members)
-        self.assertEqual(reason, "combination_limit_exceeded")
 
     def test_study_rejects_overlap_and_consumed_independent_holdout(self) -> None:
         with tempfile.TemporaryDirectory() as folder:
             path = Path(folder) / "study.json"
             base = {
-                "family_id": "family", "annualization": 252, "quality_top_k": 10,
+                "family_id": "family", "annualization": 252, "quality_top_k": 100,
+                "quality_method": "ema20_robust_specific_quality_v1",
                 "n_values": [2], "hac_lags": 1,
                 "deployments": [{
                     "deployment_id": "x",
@@ -98,6 +78,17 @@ class CoreTests(unittest.TestCase):
             base["deployments"][0]["evidence_role"] = "independent_holdout"
             path.write_text(json.dumps(base), encoding="utf-8")
             with self.assertRaises(ContractError):
+                load_study(path)
+
+    def test_study_rejects_raw_sharpe_as_quality_method(self) -> None:
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / "study.json"
+            path.write_text(json.dumps({
+                "family_id": "family", "annualization": 252, "quality_top_k": 100,
+                "quality_method": "raw_sharpe", "n_values": [3], "hac_lags": 1,
+                "deployments": [],
+            }), encoding="utf-8")
+            with self.assertRaisesRegex(ContractError, "raw Sharpe is not allowed"):
                 load_study(path)
 
     def test_performance_handles_zero_volatility(self) -> None:

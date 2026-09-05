@@ -1,102 +1,96 @@
 ---
 name: optimize-strategy-portfolios
-description: 对已有量化候选策略的正式扣费账户执行可复现的组合优化与风险审计：先检查正残差 Alpha、交易活跃度和质量门槛，再计算普通、控制后、下行和尾部 Beta，比较质量等权、低 Beta、稳健 Beta、残差去相关及风险簇约束方案，并用滚动估计、下一期冻结验证和已消费证据账本防止后选择。用于用户要求组合大量候选策略、降低共同风险暴露、比较不同 N 或验证低 Beta Alpha 是否可迁移时；不用于训练模型、生成新信号、股票投票或新建交易回测器。
+description: 复现 EMA20 已验证的质量保护型低 Beta 策略组合流程：对大量已发布、已扣费候选策略账户，使用部署日前的滚动窗口计算残差稳健质量分，过资格门槛后取质量 Top100，再按相对家族 full 基准的普通 Beta 升序选择不同 N，构建等权线性袖套并在下一期冻结验证。用于用户要求“按 EMA20 那套方法”做低 Beta 组合、N 敏感性或迁移到另一策略家族时；不用于按原始 Sharpe 取 Top100、股票投票账户、稳健 Beta/去相关/风险簇扩展或模型训练。
 ---
 
-# 优化策略组合
+# 复现 EMA20 质量保护型低 Beta 袖套
 
-严格按以下顺序工作：
+默认只执行下面这条唯一主流程：
 
 ```text
-定位正式扣费账户与家族基准 → 冻结滚动窗口和规则
-→ 复现基准与候选收益 → 执行 Alpha 和基础可用性门禁
-→ 固定质量保护层 → 计算多类 Beta 与尾部共振
-→ 完整运行 N 敏感性 → 可选残差去相关与风险簇约束
-→ 冻结成员在下一期验证 → 报告全部配置与证据身份
+已发布候选正式账户
+→ 部署年前三年估计
+→ 基础可用性与正控制后 Alpha 门槛
+→ 计算 EMA20 同口径的 robust_quality_score
+→ 按 robust_quality_score 降序取 Top100
+→ 对家族 full 基准计算普通 Beta
+→ 按 Beta 升序取前 N
+→ N 个已扣费候选账户按 1/N 线性等权
+→ 成员和权重在部署期冻结
+→ 逐年与整段评估收益、回撤和多类 Beta
 ```
 
-运行前完整读取 [数据与实验契约](references/data-and-experiment-contract.md)。解释回归、筛选、相关性和结论时读取 [组合方法](references/portfolio-methodology.md)。
+执行前必须完整读取 [EMA20 标准流程](references/ema20-canonical-workflow.md) 和 [数据与实验契约](references/data-and-experiment-contract.md)。
 
-## 1. 适配目标策略仓库
+## 1. 以目标仓库为事实来源
 
-先读取仓库指令、配置、数据样例、候选生成入口、正式账户收益和现有回测入口。定位：
+先定位候选策略的已扣费正式账户日收益、稳定 `candidate_id`、各家族自身 full 基准、控制因子和已有质量诊断。复用仓库现有加载和回测入口；只写字段适配器，不重训模型、不重生信号、不改交易执行。
 
-- 稳定唯一的 `candidate_id`；
-- 已经扣除成本的候选日收益；
-- 每个策略家族的主基准；
-- 时点可用的控制因子、交易活跃度、信号和风险簇数据；
-- 权威基线 run 与可复用的正式组合回测入口。
+若目标仓库已有 EMA20 同口径的 `eligible`、`robust_quality_score` 和风险回归产物，优先复现并直接消费。若没有，严格按标准流程重算，不得用原始 Sharpe、年化收益或临时综合分替代。
 
-只编写隔离的字段适配器，不复制训练、信号或交易执行逻辑。多个映射均合理时先询问用户。
+## 2. 冻结时间与规则
 
-## 2. 冻结研究规格
+对部署期 (Y)，只用 (Y-3) 至 (Y-1) 的信息计算资格、质量和 Beta。在读取 (Y) 期收益前冻结：
 
-在读取任何部署期表现前，冻结：
+- 三年估计窗口和下一期评估窗口；
+- 家族 full 主基准与控制因子；
+- Top100、N 网格、Beta 定义和 `candidate_id` 破局规则；
+- 证据是否已用于调参。
 
-- 估计期、部署期、年化因子和交易日历；
-- 家族主基准及可选跨家族基准；
-- 质量排名方向、质量保护数量、`N` 列表和稳定破局规则；
-- 控制因子、HAC lag、去相关候选池和簇约束；
-- 每个部署期的证据角色与 `consumed_for_selection`。
+复现 EMA20 N 敏感性时使用冻结网格 `N=[1,3,5,10,15,20]`。迁移到新家族时可预注册其他 N，但必须在评估期可见前写入规格，不得根据历史赢家事后挑 N。
 
-默认示例可使用前三年估计、下一年冻结验证、质量 Top100 和 `N=[3,5,10]`，但必须写入 `study.json`，不得作为隐藏默认。已参与调参的历史区间标记为 `consumed_research`，不得重新包装为独立 OOS。
+## 3. 严格复现质量保护层
 
-## 3. 先检查 Alpha 与质量
+基础资格同时要求：估计期复合收益为正、波动非零、非零收益日/交易活动正常、对家族 full 基准及控制因子的控制后 Alpha 为正、六个半年中至少四个残差 Sharpe 为正，且账户与必需风险数据覆盖完整。
 
-低 Beta 不能创造 Alpha。对每个滚动估计期，只保留同时满足以下条件的候选：
+然后按 EMA20 公式计算 `robust_quality_score`。它是残差 Sharpe 和残差正收益日占比的多窗口分位复合分，不是原始 Sharpe。在通过资格的候选中按：
 
-- 目标仓库的 `eligible=true`；
-- 估计期复合收益为正且波动率非零；
-- 对家族主基准和控制因子回归的残差 Alpha 为正；
-- 交易活跃度与账户、信号、风格暴露覆盖通过目标仓库的预注册门槛；
-- 残差分段稳定性达到 `study.json` 中冻结的要求。
-
-然后在合格分母中按冻结的质量分数保留 Top-Q。质量分数并列时按 `candidate_id` 升序。不得因 Beta 很低而豁免质量门禁。
-
-## 4. 测量暴露并构建组合
-
-对质量池计算普通 Beta、控制后 Beta、下行 Beta、最差10%/5% Beta、共同亏损率、残差 Alpha 和 HAC 标准误。每个 N 至少完整运行：
-
-- `QUALITY_EQ`：质量最高 N 套等权；
-- `LOW_BETA_EQ`：质量池内普通 Beta 最低 N 套等权；
-- `ROBUST_BETA_EQ`：按普通、控制后、下行和最差10% Beta 的最差截面分位升序取 N 套。
-
-只在组合数未超过冻结上限时枚举 `DECORRELATED_RISK_CAPPED_EQ`：要求四类估计期组合 Beta 都不高于同 N `LOW_BETA_EQ`，再依次最小化残差相关中位数、最大残差相关、尾部 Beta、普通 Beta 和候选 ID。提供风险簇时可再运行 `CLUSTER_CAPPED_DECORRELATED_EQ`；簇只限制集中度，不强制全簇等权。
-
-组合均为已发布正式扣费账户日收益的等权线性袖套。不得用这一结果代替股票投票账户或联合资金账户。
-
-## 5. 冻结验证与报告
-
-成员、权重、N、基准和约束只能使用估计期信息，部署期不重排、不换人。完整报告全部 `deployment × N × scheme`，包括失败和不可行配置，不得只报历史赢家。
-
-运行：
-
-```bash
-python3 scripts/run_portfolio_optimization.py \
-  --study study.json \
-  --candidate-returns candidate_returns.csv \
-  --benchmark-returns benchmark_returns.csv \
-  --diagnostics candidate_diagnostics.csv \
-  --controls control_returns.csv \
-  --clusters candidate_clusters.csv \
-  --signals candidate_signals.csv \
-  --prior-oos-ledger prior_oos_access_ledger.csv \
-  --selection-spec frozen_selection_spec.json \
-  --output-dir runs/portfolio-audit
+```text
+robust_quality_score 降序 → candidate_id 升序
 ```
 
-`--controls`、`--clusters` 和 `--signals` 可选。只有全部评估期都标记为已消费研究证据时才可省略 `--prior-oos-ledger` 和 `--selection-spec`；声称独立留出或前瞻监测时必须提供已冻结选择规格及其 SHA-256，并提供之前未访问的逐事件哈希链账本。控制因子未提供时，控制后指标与普通回归口径一致并显式记录。使用 `build_portfolio_report.py` 从结构化产物重建中文 Markdown 报告。
-脚本需要 Python 3 和 NumPy；先在目标环境验证依赖，不得静默切换数值实现。
+取前100。若无法得到该分数或无法验证其时点，停止并报告适配缺口；禁止退化为“按 Sharpe 取 Top100”。
 
-## 与其他 Skill 的边界
+## 4. 只在 Top100 中做普通 Beta 排序
 
-- 候选产生、重复随机小组锦标赛、选标重合强制去重和股票投票使用 `$strategy-n-select`。
-- 模型训练、标签、特征、股票池、容量和模型后选择过拟合审计使用 `$ml-strategy-overfitting-audit`。
-- 本 Skill 只处理已有候选账户的质量保护、风险暴露和线性袖套组合。
+对每个 Top100 候选用同一估计期回归：
+
+\[
+r_{i,t}=\alpha_i+\beta_i r_{full,t}+\epsilon_{i,t}.
+\]
+
+主选择指标只是上式的普通 \(\beta_i\)。按：
+
+```text
+ordinary_beta 升序 → candidate_id 升序
+```
+
+取前 N，各成员权重为 `1/N`。不用部署期收益重排，不优化连续权重，不加现金、做空或杠杆。
+
+线性袖套日收益为：
+
+\[
+r_{p,t}=\frac{1}{N}\sum_{i=1}^{N}r_{i,t},
+\]
+
+其中 (r_{i,t}) 必须是候选策略已发布的正式扣费账户收益。候选策略内部原生持股和双日期袖套已反映在这个账户收益中；不在组合层再改写。
+
+## 5. 评估与报告
+
+对每个 `deployment × N` 和所有滚动部署期拼接段，完整报告年化收益、Sharpe、最大回撤、普通 Beta、控制后 Beta、下行 Beta、最差10%/5% Beta、共同亏损率、控制后 Alpha、成员换手和成员收益相关。展示全部 N，不隐藏失败配置。
+
+运行后确认：成员数恰为 N、权重和为1、N 网格为同一 Beta 排名的嵌套前缀，且组合 Beta 在同一回归日历下等于成员 Beta 的等权平均。
+
+## 6. 不得混入主流程的内容
+
+- `QUALITY_EQ` 可作为诊断对照，但不是低 Beta 成员选择的并列生产分支。
+- `ROBUST_BETA_EQ`、残差去相关枚举和风险簇约束是后续独立对照实验，只有用户明确要求时才能另立规格、另建输出目录；不得画成默认主流程的并列分支。
+- 选中 N 个策略后的“投票 Top3”或“所有获票股票等权”是独立股票聚合实验，不是线性袖套。用户未明确要求时，不读取候选股票信号，不调用 `$strategy-n-select`，不调用联合资金或 Nshape 执行器。
+- 不把原始 Sharpe 写成 Top100 评分，不把一个半年残差 Sharpe 门槛写成最终排名指标。
 
 ## 失败原则
 
-- 基准、时间身份、成本口径或证据是否已消费不明时暂停，不自行猜测。
-- 基线不能复现时不执行依赖该基线的优化。
-- 合格候选少于 N、部署期覆盖不全或组合约束不可行时，记录 `infeasible`；不降低 N、不放宽约束。
-- 没有新的未消费数据时，最高结论为 `research_candidate_pending_forward`，不直接修改生产组合。
+- 家族主基准、正式扣费口径、质量公式或时间身份不明时停止，不自行填补。
+- Top100 或基准不能复现时，不继续报低 Beta 结果。
+- 合格候选少于100或少于 N 时记录 `infeasible`，不降低门槛、不从其他池补人。
+- 已用于挑 N 或修改规则的历史期间一律标记为已消费研究证据；没有新前瞻数据时不宣称生产有效。

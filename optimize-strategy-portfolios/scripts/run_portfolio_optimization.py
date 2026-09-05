@@ -18,10 +18,8 @@ from portfolio_optimization_core import (
     RISK_KEYS,
     SCHEMA_VERSION,
     compound_return,
-    enumerate_decorrelated,
     load_study,
     load_selection_spec,
-    mean_signal_jaccard,
     object_hash,
     ols_with_hac,
     pairwise_values,
@@ -29,12 +27,10 @@ from portfolio_optimization_core import (
     performance_metrics,
     portfolio_series,
     prepare_output_dir,
-    read_clusters,
     read_controls,
     read_diagnostics,
     read_prior_ledger,
     read_return_panel,
-    read_signals,
     risk_metrics,
     select_fixed_schemes,
     sha256_file,
@@ -44,7 +40,7 @@ from portfolio_optimization_core import (
 
 
 CANDIDATE_FIELDS = [
-    "deployment_id", "candidate_id", "eligible", "exclusion_reasons", "quality_score",
+    "deployment_id", "candidate_id", "eligible", "exclusion_reasons", "robust_quality_score",
     "quality_rank", "in_quality_pool", "estimation_compound_return", "estimation_volatility",
     "ordinary_beta", "controlled_beta", "downside_beta", "tail_10_beta", "tail_5_beta",
     "common_loss_rate", "residual_alpha", "residual_alpha_hac_se", "observations",
@@ -76,8 +72,6 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--benchmark-returns", required=True, type=Path)
     parser.add_argument("--diagnostics", required=True, type=Path)
     parser.add_argument("--controls", type=Path)
-    parser.add_argument("--clusters", type=Path)
-    parser.add_argument("--signals", type=Path)
     parser.add_argument("--prior-oos-ledger", type=Path)
     parser.add_argument("--selection-spec", type=Path)
     parser.add_argument("--output-dir", required=True, type=Path)
@@ -95,10 +89,6 @@ def _control_matrix(days: Sequence[date], controls: Mapping[date, Sequence[float
     if missing:
         raise ContractError(f"control returns missing {missing[0].isoformat()}")
     return [list(controls[day]) for day in days]
-
-
-def _portfolio_beta_caps(members: Sequence[str], lookup: Mapping[str, Mapping[str, Any]]) -> dict[str, float]:
-    return {key: sum(float(lookup[candidate][key]) for candidate in members) / len(members) for key in RISK_KEYS}
 
 
 def _fmt(value: Any) -> Any:
@@ -128,13 +118,11 @@ def run(args: argparse.Namespace) -> None:
     benchmark_panel = read_return_panel(args.benchmark_returns, "benchmark_id")
     diagnostics = read_diagnostics(args.diagnostics)
     factor_ids, controls = read_controls(args.controls)
-    clusters = read_clusters(args.clusters)
-    signals = read_signals(args.signals)
     prior_ledger = read_prior_ledger(args.prior_oos_ledger)
     selection_spec = load_selection_spec(args.selection_spec)
     actual_selection_spec_hash = sha256_file(args.selection_spec) if args.selection_spec else ""
     provenance_sources: dict[str, str] = {}
-    for record in list(diagnostics.values()) + list(clusters.values()):
+    for record in diagnostics.values():
         source_path = Path(record["source_artifact_path"])
         expected_hash = str(record["source_artifact_sha256"])
         if not source_path.is_file():
@@ -151,7 +139,6 @@ def run(args: argparse.Namespace) -> None:
     hac_lags = int(study["hac_lags"])
     minimum_periods = int(study.get("minimum_positive_residual_periods", 0))
     n_values = [int(value) for value in study["n_values"]]
-    decorrelation = study.get("decorrelation", {"enabled": False})
     primary_benchmark_ids = {str(item["benchmark_id"]) for item in study["deployments"]}
     if len(primary_benchmark_ids) != 1:
         raise ContractError("one run must represent one strategy family with one primary benchmark")
@@ -325,7 +312,7 @@ def run(args: argparse.Namespace) -> None:
                 "candidate_id": candidate,
                 "eligible": not reasons,
                 "exclusion_reasons": "|".join(reasons),
-                "quality_score": diag["quality_score"],
+                "robust_quality_score": diag["robust_quality_score"],
                 "quality_rank": "",
                 "in_quality_pool": False,
                 "estimation_compound_return": compound,
@@ -336,7 +323,7 @@ def run(args: argparse.Namespace) -> None:
 
         eligible = sorted(
             (row for row in local_rows if row["eligible"]),
-            key=lambda row: (-float(row["quality_score"]), str(row["candidate_id"])),
+            key=lambda row: (-float(row["robust_quality_score"]), str(row["candidate_id"])),
         )
         quality_pool = eligible[:quality_top_k]
         ranks = {str(row["candidate_id"]): index for index, row in enumerate(eligible, 1)}
@@ -346,17 +333,11 @@ def run(args: argparse.Namespace) -> None:
             row["quality_rank"] = ranks.get(candidate, "")
             row["in_quality_pool"] = candidate in quality_ids
             candidate_rows.append({key: _fmt(row.get(key)) for key in CANDIDATE_FIELDS})
-        quality_lookup = {str(row["candidate_id"]): row for row in quality_pool}
-
         selections: dict[tuple[str, int], list[str]] = {}
         for n in n_values:
             fixed = select_fixed_schemes(quality_pool, n)
             if not fixed:
-                missing_schemes = ["QUALITY_EQ", "LOW_BETA_EQ", "ROBUST_BETA_EQ"]
-                if decorrelation.get("enabled") and n in [int(x) for x in decorrelation.get("n_values", [])]:
-                    missing_schemes.append("DECORRELATED_RISK_CAPPED_EQ")
-                    if decorrelation.get("cluster_constraint", {}).get("enabled"):
-                        missing_schemes.append("CLUSTER_CAPPED_DECORRELATED_EQ")
+                missing_schemes = ["LOW_BETA_EQ"]
                 for scheme in missing_schemes:
                     infeasible_rows.append({
                         "deployment_id": deployment_id, "scheme": scheme, "n": n,
@@ -366,56 +347,6 @@ def run(args: argparse.Namespace) -> None:
                 continue
             for scheme, members in fixed.items():
                 selections[(scheme, n)] = members
-
-            if decorrelation.get("enabled") and n in [int(x) for x in decorrelation.get("n_values", [])]:
-                pool_size = int(decorrelation["pool_size"])
-                enumeration_pool = quality_pool[:pool_size]
-                beta_caps = _portfolio_beta_caps(fixed["LOW_BETA_EQ"], quality_lookup)
-                members, reason, combo_count = enumerate_decorrelated(
-                    enumeration_pool, n, residuals, beta_caps, int(decorrelation["max_combinations"])
-                )
-                if members is None:
-                    infeasible_rows.append({
-                        "deployment_id": deployment_id, "scheme": "DECORRELATED_RISK_CAPPED_EQ",
-                        "n": n, "stage": "selection", "reason": reason,
-                        "detail": f"combinations={combo_count}",
-                    })
-                else:
-                    selections[("DECORRELATED_RISK_CAPPED_EQ", n)] = members
-
-                constraint = decorrelation.get("cluster_constraint", {})
-                if constraint.get("enabled"):
-                    cluster_map: dict[str, str] = {}
-                    for row in enumeration_pool:
-                        candidate = str(row["candidate_id"])
-                        cluster_record = clusters.get((deployment_id, candidate))
-                        if cluster_record is None:
-                            continue
-                        if (
-                            cluster_record["estimation_start"] != est_start
-                            or cluster_record["estimation_end"] != est_end
-                            or cluster_record["as_of"] != est_end
-                        ):
-                            raise ContractError(
-                                f"deployment {deployment_id} cluster provenance mismatch for {candidate}"
-                            )
-                        cluster_map[candidate] = str(cluster_record["cluster_id"])
-                    minimum = int(constraint.get("minimum_clusters", {}).get(str(n), 1))
-                    clustered, reason, combo_count = enumerate_decorrelated(
-                        enumeration_pool, n, residuals, beta_caps,
-                        int(decorrelation["max_combinations"]), clusters=cluster_map,
-                        minimum_clusters=minimum,
-                        max_per_cluster=int(constraint["max_per_cluster"]),
-                    )
-                    if clustered is None:
-                        infeasible_rows.append({
-                            "deployment_id": deployment_id,
-                            "scheme": "CLUSTER_CAPPED_DECORRELATED_EQ", "n": n,
-                            "stage": "selection", "reason": reason,
-                            "detail": f"combinations={combo_count}",
-                        })
-                    else:
-                        selections[("CLUSTER_CAPPED_DECORRELATED_EQ", n)] = clustered
 
         comparison_ids = [benchmark_id] + [
             str(item) for item in deployment.get("comparison_benchmark_ids", []) if str(item) != benchmark_id
@@ -429,10 +360,7 @@ def run(args: argparse.Namespace) -> None:
                 member_rows.append({
                     "deployment_id": deployment_id, "scheme": scheme, "n": n,
                     "candidate_id": candidate, "weight": _fmt(1.0 / n),
-                    "cluster_id": (
-                        clusters[(deployment_id, candidate)]["cluster_id"]
-                        if (deployment_id, candidate) in clusters else ""
-                    ),
+                    "cluster_id": "",
                 })
             for first_index, first in enumerate(sorted(members)):
                 for second in sorted(members)[first_index + 1:]:
@@ -443,7 +371,7 @@ def run(args: argparse.Namespace) -> None:
                         "candidate_id_a": first, "candidate_id_b": second,
                         "raw_return_correlation": _fmt(raw_corr[0] if raw_corr else math.nan),
                         "residual_correlation": _fmt(residual_corr[0] if residual_corr else math.nan),
-                        "signal_jaccard": _fmt(mean_signal_jaccard(first, second, signals, est_start, est_end)),
+                        "signal_jaccard": "",
                     })
             try:
                 period_series = {
@@ -550,7 +478,7 @@ def run(args: argparse.Namespace) -> None:
     input_paths = {
         "study": args.study, "candidate_returns": args.candidate_returns,
         "benchmark_returns": args.benchmark_returns, "diagnostics": args.diagnostics,
-        "controls": args.controls, "clusters": args.clusters, "signals": args.signals,
+        "controls": args.controls,
         "prior_oos_ledger": args.prior_oos_ledger,
         "selection_spec": args.selection_spec,
     }

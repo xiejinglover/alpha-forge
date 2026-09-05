@@ -6,7 +6,7 @@ Alpha Forge 是一个面向量化研究的 Codex Skills 仓库。每个 Skill �
 
 - [`ml-strategy-overfitting-audit`](ml-strategy-overfitting-audit/SKILL.md)：机器学习量化策略过拟合检验。
 - [`strategy-n-select`](strategy-n-select/SKILL.md)：重复随机小组 N 选优、开发期选标重合去相关和调仓日全标的/Top-K 投票组合生成。
-- [`optimize-strategy-portfolios`](optimize-strategy-portfolios/SKILL.md)：对已有候选策略账户执行质量保护、低 Beta、残差去相关、风险簇约束与滚动冻结验证。
+- [`optimize-strategy-portfolios`](optimize-strategy-portfolios/SKILL.md)：复现 EMA20 同口径的“残差稳健质量 Top100 → 普通 Beta 最低 N 套 → 冻结等权线性袖套”。
 
 ## 设计原则
 
@@ -68,10 +68,10 @@ cp -R alpha-forge/ml-strategy-overfitting-audit ~/.codex/skills/
 对已有正式扣费候选账户进行组合风险优化时：
 
 ```text
-使用 $optimize-strategy-portfolios 对候选策略运行质量保护后的低 Beta N 敏感性、残差去相关和滚动冻结验证。
+使用 $optimize-strategy-portfolios 严格复现 EMA20 低 Beta 流程：先按残差稳健质量分取 Top100，再按家族 full 基准的普通 Beta 选 N，对正式扣费账户做滚动冻结等权线性袖套。不要使用原始 Sharpe 取 Top100，不要加入股票投票、稳健 Beta、去相关或风险簇分支。
 ```
 
-三个 Skill 分工如下：`strategy-n-select` 负责候选锦标赛与股票投票；`optimize-strategy-portfolios` 负责已有候选账户的线性袖套风险优化；`ml-strategy-overfitting-audit` 负责模型层的过拟合审计。
+三个 Skill 分工如下：`strategy-n-select` 负责候选锦标赛与股票投票；`optimize-strategy-portfolios` 只负责 EMA20 同口径的质量 Top100、低 Beta N 选择和线性袖套；`ml-strategy-overfitting-audit` 负责模型层的过拟合审计。
 
 ## 检验模块
 

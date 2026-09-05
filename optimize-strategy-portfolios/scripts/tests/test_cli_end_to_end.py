@@ -44,15 +44,10 @@ class EndToEndTests(unittest.TestCase):
     def test_full_pipeline_filters_negative_alpha_and_freezes_equal_sleeves(self) -> None:
         study = self.root / "study.json"
         study.write_text(json.dumps({
-            "family_id": "family", "annualization": 252, "quality_top_k": 3,
+            "family_id": "family", "annualization": 252, "quality_top_k": 100,
+            "quality_method": "ema20_robust_specific_quality_v1",
             "n_values": [2], "hac_lags": 1,
             "minimum_positive_residual_periods": 4,
-            "decorrelation": {
-                "enabled": True, "n_values": [2], "pool_size": 3, "max_combinations": 10,
-                "cluster_constraint": {
-                    "enabled": True, "minimum_clusters": {"2": 2}, "max_per_cluster": 1,
-                },
-            },
             "deployments": [{
                 "deployment_id": "2025",
                 "estimation": {"start": "2024-01-01", "end": "2024-12-31"},
@@ -73,6 +68,7 @@ class EndToEndTests(unittest.TestCase):
         definitions = {
             "A": (0.0015, 0.2), "B": (0.0012, 0.4), "C": (0.0010, 0.8), "D": (-0.001, 0.02),
         }
+        definitions.update({f"X{index:03d}": (0.0002, 0.9 + index / 10000) for index in range(100)})
         candidate_rows = []
         for candidate, (alpha, beta) in definitions.items():
             for index, (day, benchmark_return) in enumerate(zip(all_days, self.benchmark_values)):
@@ -85,19 +81,22 @@ class EndToEndTests(unittest.TestCase):
         candidate_hash = hashlib.sha256(candidates.read_bytes()).hexdigest()
         diagnostics = self.root / "diagnostics.csv"
         write_csv(diagnostics, [
-            "deployment_id", "family_id", "candidate_id", "eligible", "quality_score",
+            "deployment_id", "family_id", "candidate_id", "eligible", "robust_quality_score",
             "trading_activity_ok", "coverage_complete", "positive_residual_periods",
             "residual_periods_total", "estimation_start", "estimation_end", "as_of",
             "rule_id", "source_artifact_path", "source_artifact_sha256",
         ], [
             {"deployment_id": "2025", "family_id": "family", "candidate_id": candidate, "eligible": "true",
-             "quality_score": score, "trading_activity_ok": "true",
+             "robust_quality_score": score, "trading_activity_ok": "true",
              "coverage_complete": "true", "positive_residual_periods": 6,
              "residual_periods_total": 6, "estimation_start": "2024-01-01",
              "estimation_end": "2024-12-31", "as_of": "2024-12-31",
              "rule_id": "quality-v1", "source_artifact_path": str(candidates),
              "source_artifact_sha256": candidate_hash}
-            for candidate, score in {"A": 2, "B": 3, "C": 4, "D": 100}.items()
+            for candidate, score in {
+                **{"A": 102, "B": 103, "C": 104, "D": 1000},
+                **{f"X{index:03d}": index for index in range(100)},
+            }.items()
         ])
         controls = self.root / "controls.csv"
         write_csv(controls, ["date", "factor_id", "return"], [
@@ -125,7 +124,7 @@ class EndToEndTests(unittest.TestCase):
         self.run_command(
             str(RUNNER), "--study", str(study), "--candidate-returns", str(candidates),
             "--benchmark-returns", str(benchmark), "--diagnostics", str(diagnostics),
-            "--controls", str(controls), "--clusters", str(clusters), "--signals", str(signals),
+            "--controls", str(controls),
             "--output-dir", str(output),
         )
         with (output / "candidate_risk_metrics.csv").open(encoding="utf-8") as handle:
@@ -137,11 +136,10 @@ class EndToEndTests(unittest.TestCase):
         low_beta = [row for row in members if row["scheme"] == "LOW_BETA_EQ"]
         self.assertEqual({row["candidate_id"] for row in low_beta}, {"A", "B"})
         self.assertTrue(all(abs(float(row["weight"]) - 0.5) < 1e-12 for row in low_beta))
-        self.assertIn("DECORRELATED_RISK_CAPPED_EQ", {row["scheme"] for row in members})
-        self.assertIn("CLUSTER_CAPPED_DECORRELATED_EQ", {row["scheme"] for row in members})
+        self.assertEqual({row["scheme"] for row in members}, {"LOW_BETA_EQ"})
         with (output / "pairwise_diagnostics.csv").open(encoding="utf-8") as handle:
             pairs = list(csv.DictReader(handle))
-        self.assertTrue(any(row["signal_jaccard"] != "" for row in pairs))
+        self.assertTrue(all(row["signal_jaccard"] == "" for row in pairs))
         with (output / "portfolio_metrics.csv").open(encoding="utf-8") as handle:
             metrics = list(csv.DictReader(handle))
         low_eval = next(row for row in metrics if row["scheme"] == "LOW_BETA_EQ" and row["period"] == "evaluation")
@@ -184,7 +182,6 @@ class EndToEndTests(unittest.TestCase):
             str(RUNNER), "--study", str(independent_study),
             "--candidate-returns", str(candidates), "--benchmark-returns", str(benchmark),
             "--diagnostics", str(diagnostics), "--controls", str(controls),
-            "--clusters", str(clusters), "--signals", str(signals),
             "--selection-spec", str(selection_spec),
             "--output-dir", str(self.root / "missing-ledger"), expected=2,
         )
@@ -205,7 +202,6 @@ class EndToEndTests(unittest.TestCase):
             str(RUNNER), "--study", str(independent_study),
             "--candidate-returns", str(candidates), "--benchmark-returns", str(benchmark),
             "--diagnostics", str(diagnostics), "--controls", str(controls),
-            "--clusters", str(clusters), "--signals", str(signals),
             "--prior-oos-ledger", str(prior_ledger), "--selection-spec", str(selection_spec),
             "--output-dir", str(independent_output),
         )
@@ -246,16 +242,18 @@ class EndToEndTests(unittest.TestCase):
             str(RUNNER), "--study", str(forward_study),
             "--candidate-returns", str(candidates), "--benchmark-returns", str(benchmark),
             "--diagnostics", str(diagnostics), "--controls", str(controls),
-            "--clusters", str(clusters), "--signals", str(signals),
             "--prior-oos-ledger", str(forward_ledger), "--selection-spec", str(forward_spec),
             "--output-dir", str(forward_output),
         )
-        self.assertIn("forward_supported", (forward_output / "report.md").read_text(encoding="utf-8"))
+        self.assertIn(
+            "research_candidate_pending_forward",
+            (forward_output / "report.md").read_text(encoding="utf-8"),
+        )
 
         rejected = self.run_command(
             str(RUNNER), "--study", str(study), "--candidate-returns", str(candidates),
             "--benchmark-returns", str(benchmark), "--diagnostics", str(diagnostics),
-            "--controls", str(controls), "--clusters", str(clusters), "--signals", str(signals),
+            "--controls", str(controls),
             "--output-dir", str(output), expected=2,
         )
         self.assertIn("not empty", rejected.stderr)
@@ -280,7 +278,8 @@ class EndToEndTests(unittest.TestCase):
     def test_missing_diagnostic_candidate_is_rejected(self) -> None:
         study = self.root / "study.json"
         study.write_text(json.dumps({
-            "family_id": "family", "annualization": 252, "quality_top_k": 2,
+            "family_id": "family", "annualization": 252, "quality_top_k": 100,
+            "quality_method": "ema20_robust_specific_quality_v1",
             "n_values": [1], "hac_lags": 0,
             "deployments": [{
                 "deployment_id": "2025",
@@ -307,13 +306,13 @@ class EndToEndTests(unittest.TestCase):
         candidate_hash = hashlib.sha256(candidates.read_bytes()).hexdigest()
         diagnostics = self.root / "diagnostics.csv"
         write_csv(diagnostics, [
-            "deployment_id", "family_id", "candidate_id", "eligible", "quality_score",
+            "deployment_id", "family_id", "candidate_id", "eligible", "robust_quality_score",
             "trading_activity_ok", "coverage_complete", "positive_residual_periods",
             "residual_periods_total", "estimation_start", "estimation_end", "as_of",
             "rule_id", "source_artifact_path", "source_artifact_sha256",
         ], [{
             "deployment_id": "2025", "family_id": "family", "candidate_id": "A", "eligible": "true",
-            "quality_score": 1, "trading_activity_ok": "true", "coverage_complete": "true",
+            "robust_quality_score": 1, "trading_activity_ok": "true", "coverage_complete": "true",
             "positive_residual_periods": 6, "residual_periods_total": 6,
             "estimation_start": "2024-01-01", "estimation_end": "2024-12-31",
             "as_of": "2024-12-31", "rule_id": "quality-v1",
