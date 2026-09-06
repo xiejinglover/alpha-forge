@@ -1,4 +1,4 @@
 interface:
   display_name: "EMA20同口径低Beta袖套"
   short_description: "稳健质量Top100后按普通Beta选N并滚动冻结等权"
-  default_prompt: "Use $optimize-strategy-portfolios to reproduce the EMA20 canonical workflow only: robust residual-quality Top100, ordinary-beta ascending selection, frozen N-member equal linear sleeves, and next-period evaluation. Do not substitute raw Sharpe or add voting, robust-beta, decorrelation, or cluster branches unless separately requested."
+  default_prompt: "Use $optimize-strategy-portfolios to reproduce the EMA20 canonical workflow with its validated bundled control-factor returns: robust residual-quality Top100, ordinary-beta ascending selection, frozen N-member equal linear sleeves, and next-period evaluation. Stop on factor-date gaps. Do not substitute raw Sharpe or add voting, robust-beta, decorrelation, or cluster branches unless separately requested."

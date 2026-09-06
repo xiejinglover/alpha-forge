@@ -68,7 +68,7 @@ cp -R alpha-forge/ml-strategy-overfitting-audit ~/.codex/skills/
 对已有正式扣费候选账户进行组合风险优化时：
 
 ```text
-使用 $optimize-strategy-portfolios 严格复现 EMA20 低 Beta 流程：先按残差稳健质量分取 Top100，再按家族 full 基准的普通 Beta 选 N，对正式扣费账户做滚动冻结等权线性袖套。不要使用原始 Sharpe 取 Top100，不要加入股票投票、稳健 Beta、去相关或风险簇分支。
+使用 $optimize-strategy-portfolios 严格复现 EMA20 低 Beta 流程：使用 Skill 内置且经清单校验的九列日频控制因子收益，先按残差稳健质量分取 Top100，再按家族 full 基准的普通 Beta 选 N，对正式扣费账户做滚动冻结等权线性袖套。不要使用原始 Sharpe 取 Top100，不要加入股票投票、稳健 Beta、去相关或风险簇分支。
 ```
 
 三个 Skill 分工如下：`strategy-n-select` 负责候选锦标赛与股票投票；`optimize-strategy-portfolios` 只负责 EMA20 同口径的质量 Top100、低 Beta N 选择和线性袖套；`ml-strategy-overfitting-audit` 负责模型层的过拟合审计。
@@ -119,7 +119,8 @@ python3 ml-strategy-overfitting-audit/scripts/build_audit_report.py \
 | `compute_stability_metrics.py` | 计算 IC、RankIC、Top-K Jaccard、排序相关、预测漂移和信号翻转 |
 | `audit_model_selection.py` | 审计 trial 分母、容量族、训练—验证 gap、人工覆盖和后选择 |
 | `build_audit_report.py` | 验证审计结果完整性并生成总—分结构 Markdown 报告 |
-| `run_portfolio_optimization.py` | 运行质量保护、多类 Beta、等权组合和滚动冻结评估 |
+| `run_portfolio_optimization.py` | 使用内置控制因子运行质量保护、多类 Beta、等权组合和滚动冻结评估 |
+| `validate_bundled_factor_returns.py` | 校验内置因子收益的哈希、日期、字段与数值完整性 |
 | `build_portfolio_report.py` | 验证冻结产物哈希并重建组合审计报告 |
 
 查看任一脚本的输入字段和命令行选项：

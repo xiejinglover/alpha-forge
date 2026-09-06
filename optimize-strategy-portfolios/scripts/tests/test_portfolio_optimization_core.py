@@ -14,6 +14,7 @@ from portfolio_optimization_core import (
     ContractError,
     load_study,
     performance_metrics,
+    read_controls,
     risk_metrics,
     select_fixed_schemes,
 )
@@ -95,6 +96,27 @@ class CoreTests(unittest.TestCase):
         metrics = performance_metrics([0.0, 0.0, 0.0], 252)
         self.assertTrue(math.isnan(metrics["sharpe"]))
         self.assertEqual(metrics["max_drawdown"], 0.0)
+
+    def test_wide_control_returns_preserve_declared_factor_order(self) -> None:
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / "controls.csv"
+            path.write_text(
+                "trade_date,size,beta\n2024-01-02,0.2,0.1\n2024-01-03,0.4,0.3\n",
+                encoding="utf-8",
+            )
+            factors, values = read_controls(path)
+            self.assertEqual(factors, ["size", "beta"])
+            self.assertEqual(values[next(iter(values))], [0.2, 0.1])
+
+    def test_wide_control_returns_reject_unsorted_dates(self) -> None:
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / "controls.csv"
+            path.write_text(
+                "trade_date,beta\n2024-01-03,0.1\n2024-01-02,0.2\n",
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(ContractError, "strictly increasing"):
+                read_controls(path)
 
 
 if __name__ == "__main__":

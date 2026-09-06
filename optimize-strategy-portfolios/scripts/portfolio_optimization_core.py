@@ -158,18 +158,33 @@ def read_diagnostics(path: Path) -> dict[tuple[str, str], dict[str, Any]]:
 def read_controls(path: Path | None) -> tuple[list[str], dict[date, list[float]]]:
     if path is None:
         return [], {}
-    raw: dict[date, dict[str, float]] = defaultdict(dict)
-    factor_ids: set[str] = set()
     with path.open(encoding="utf-8", newline="") as handle:
         reader = csv.DictReader(handle)
-        require_columns(reader, {"date", "factor_id", "return"}, path)
-        for line, row in enumerate(reader, 2):
-            day = parse_date(row["date"], f"{path}:{line}:date")
-            factor = row["factor_id"].strip()
-            if not factor or factor in raw[day]:
-                raise ContractError(f"{path}:{line} blank or duplicate date+factor_id")
-            raw[day][factor] = finite_float(row["return"], f"{path}:{line}:return")
-            factor_ids.add(factor)
+        fields = list(reader.fieldnames or [])
+        if {"date", "factor_id", "return"}.issubset(fields):
+            return _read_long_controls(reader, path)
+        if fields and fields[0] == "trade_date" and len(fields) > 1:
+            return _read_wide_controls(reader, path, fields[1:])
+        raise ContractError(
+            f"{path} must use long date,factor_id,return or wide "
+            "trade_date,<factor columns> control-return schema"
+        )
+
+
+def _read_long_controls(
+    reader: csv.DictReader, path: Path,
+) -> tuple[list[str], dict[date, list[float]]]:
+    raw: dict[date, dict[str, float]] = defaultdict(dict)
+    factor_ids: set[str] = set()
+    for line, row in enumerate(reader, 2):
+        day = parse_date(row["date"], f"{path}:{line}:date")
+        factor = row["factor_id"].strip()
+        if not factor or factor in raw[day]:
+            raise ContractError(f"{path}:{line} blank or duplicate date+factor_id")
+        raw[day][factor] = finite_float(row["return"], f"{path}:{line}:return")
+        factor_ids.add(factor)
+    if not raw or not factor_ids:
+        raise ContractError(f"{path} contains no control returns")
     ordered = sorted(factor_ids)
     controls: dict[date, list[float]] = {}
     for day, values in raw.items():
@@ -177,6 +192,28 @@ def read_controls(path: Path | None) -> tuple[list[str], dict[date, list[float]]
             raise ContractError(f"{path}: incomplete factor set on {day.isoformat()}")
         controls[day] = [values[factor] for factor in ordered]
     return ordered, controls
+
+
+def _read_wide_controls(
+    reader: csv.DictReader, path: Path, factor_ids: Sequence[str],
+) -> tuple[list[str], dict[date, list[float]]]:
+    if any(not factor.strip() for factor in factor_ids) or len(set(factor_ids)) != len(factor_ids):
+        raise ContractError(f"{path} contains blank or duplicate factor columns")
+    controls: dict[date, list[float]] = {}
+    previous_day: date | None = None
+    for line, row in enumerate(reader, 2):
+        day = parse_date(row["trade_date"], f"{path}:{line}:trade_date")
+        if day in controls:
+            raise ContractError(f"{path}:{line} duplicate trade_date")
+        if previous_day is not None and day <= previous_day:
+            raise ContractError(f"{path}:{line} trade_date must be strictly increasing")
+        controls[day] = [
+            finite_float(row[factor], f"{path}:{line}:{factor}") for factor in factor_ids
+        ]
+        previous_day = day
+    if not controls:
+        raise ContractError(f"{path} contains no control returns")
+    return list(factor_ids), controls
 
 
 def read_prior_ledger(path: Path | None) -> list[dict[str, Any]]:

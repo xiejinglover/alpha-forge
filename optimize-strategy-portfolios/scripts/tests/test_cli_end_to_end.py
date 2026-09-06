@@ -318,9 +318,15 @@ class EndToEndTests(unittest.TestCase):
             "as_of": "2024-12-31", "rule_id": "quality-v1",
             "source_artifact_path": str(candidates), "source_artifact_sha256": candidate_hash,
         }])
+        controls = self.root / "controls.csv"
+        write_csv(controls, ["date", "factor_id", "return"], [
+            {"date": day.isoformat(), "factor_id": "style", "return": 0.0001}
+            for day in all_days
+        ])
         result = self.run_command(
             str(RUNNER), "--study", str(study), "--candidate-returns", str(candidates),
             "--benchmark-returns", str(benchmark), "--diagnostics", str(diagnostics),
+            "--controls", str(controls),
             "--output-dir", str(self.root / "output"), expected=2,
         )
         self.assertIn("diagnostic denominator mismatch", result.stderr)

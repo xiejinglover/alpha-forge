@@ -1,0 +1,45 @@
+{
+  "dataset_id": "third_party_china_equity_style_returns_v1",
+  "asset_file": "ema20_control_factor_returns_asof_2026-08-31.csv",
+  "source": {
+    "provider": "third-party data provider",
+    "access_path": "authorized source export",
+    "credential_storage": "none"
+  },
+  "snapshot": {
+    "exported_at": "2026-09-06",
+    "as_of_trade_date": "2026-08-31",
+    "start_trade_date": "2008-01-02",
+    "end_trade_date": "2026-08-31",
+    "row_count": 4536,
+    "size_bytes": 442914,
+    "sha256": "f260aa5834a8bbf569198e71c3ebe35e5cc552d3563e465abc9a306c649220b0"
+  },
+  "columns": [
+    "trade_date",
+    "country",
+    "beta",
+    "size",
+    "momentum",
+    "book_to_price",
+    "residual_volatility",
+    "liquidity",
+    "profitability",
+    "investment_quality"
+  ],
+  "units": "daily simple factor return in decimal form",
+  "currency": "not applicable",
+  "timezone": "Asia/Shanghai trade date",
+  "missing_value_policy": "no blank or non-finite factor value is permitted",
+  "extraction_semantics": {
+    "row_filter": "_is_deleted = 0 and TRADE_DATE <= 2026-08-31",
+    "revision_selection": "latest row per TRADE_DATE ordered by _version, UPDATE_TIME, ID descending",
+    "sort_order": "TRADE_DATE ascending"
+  },
+  "pit_boundary": {
+    "trade_date_causal_for_return_regression": true,
+    "historical_revision_vintage_pit": false,
+    "explanation": "This frozen snapshot selects the latest surviving revision for each trade date at export time. It does not reconstruct the exact revision visible on every historical deployment date."
+  },
+  "redistribution_notice": "Before publishing or redistributing this commercial-source snapshot outside an authorized environment, confirm the upstream data license."
+}

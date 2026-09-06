@@ -37,6 +37,14 @@ from portfolio_optimization_core import (
     write_csv,
     write_json,
 )
+from validate_bundled_factor_returns import ValidationError, validate as validate_control_asset
+
+
+SKILL_ROOT = Path(__file__).resolve().parents[1]
+DEFAULT_CONTROL_RETURNS = (
+    SKILL_ROOT / "assets/risk-data/ema20_control_factor_returns_asof_2026-08-31.csv"
+)
+DEFAULT_CONTROL_MANIFEST = DEFAULT_CONTROL_RETURNS.with_suffix(".manifest.json")
 
 
 CANDIDATE_FIELDS = [
@@ -71,7 +79,14 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--candidate-returns", required=True, type=Path)
     parser.add_argument("--benchmark-returns", required=True, type=Path)
     parser.add_argument("--diagnostics", required=True, type=Path)
-    parser.add_argument("--controls", type=Path)
+    parser.add_argument(
+        "--controls", type=Path, default=DEFAULT_CONTROL_RETURNS,
+        help="Control-factor returns; defaults to the bundled frozen EMA20 factor-return snapshot",
+    )
+    parser.add_argument(
+        "--controls-manifest", type=Path,
+        help="Optional integrity/provenance manifest; the bundled asset manifest is automatic",
+    )
     parser.add_argument("--prior-oos-ledger", type=Path)
     parser.add_argument("--selection-spec", type=Path)
     parser.add_argument("--output-dir", required=True, type=Path)
@@ -117,7 +132,18 @@ def run(args: argparse.Namespace) -> None:
     candidate_panel = read_return_panel(args.candidate_returns, "candidate_id")
     benchmark_panel = read_return_panel(args.benchmark_returns, "benchmark_id")
     diagnostics = read_diagnostics(args.diagnostics)
-    factor_ids, controls = read_controls(args.controls)
+    controls_path = args.controls.resolve()
+    default_controls_used = controls_path == DEFAULT_CONTROL_RETURNS.resolve()
+    controls_manifest = args.controls_manifest
+    if default_controls_used and controls_manifest is None:
+        controls_manifest = DEFAULT_CONTROL_MANIFEST
+    controls_validation: dict[str, Any] | None = None
+    if controls_manifest is not None:
+        try:
+            controls_validation = validate_control_asset(controls_path, controls_manifest.resolve())
+        except ValidationError as exc:
+            raise ContractError(f"control-return asset validation failed: {exc}") from exc
+    factor_ids, controls = read_controls(controls_path)
     prior_ledger = read_prior_ledger(args.prior_oos_ledger)
     selection_spec = load_selection_spec(args.selection_spec)
     actual_selection_spec_hash = sha256_file(args.selection_spec) if args.selection_spec else ""
@@ -131,7 +157,7 @@ def run(args: argparse.Namespace) -> None:
         if actual_hash != expected_hash:
             raise ContractError(f"provenance hash mismatch: {source_path}")
         provenance_sources[str(source_path)] = actual_hash
-    controls_supplied = args.controls is not None
+    controls_supplied = True
     prepare_output_dir(args.output_dir)
 
     annualization = int(study["annualization"])
@@ -478,7 +504,8 @@ def run(args: argparse.Namespace) -> None:
     input_paths = {
         "study": args.study, "candidate_returns": args.candidate_returns,
         "benchmark_returns": args.benchmark_returns, "diagnostics": args.diagnostics,
-        "controls": args.controls,
+        "controls": controls_path,
+        "controls_manifest": controls_manifest,
         "prior_oos_ledger": args.prior_oos_ledger,
         "selection_spec": args.selection_spec,
     }
@@ -487,7 +514,13 @@ def run(args: argparse.Namespace) -> None:
         "schema_version": SCHEMA_VERSION,
         "stage": "portfolio_optimization_complete",
         "study": study,
-        "controls": {"supplied": controls_supplied, "factor_ids": factor_ids},
+        "controls": {
+            "supplied": controls_supplied,
+            "factor_ids": factor_ids,
+            "source": "bundled_snapshot" if default_controls_used else "external_override",
+            "manifest_validated": controls_validation is not None,
+            "validation": controls_validation,
+        },
         "environment": {"python": platform.python_version(), "numpy": np.__version__},
         "inputs": {
             name: {"path": str(path.resolve()), "sha256": sha256_file(path)}
