@@ -4,6 +4,8 @@ Alpha Forge 是一个面向量化研究的 Codex Skills 仓库。每个 Skill �
 
 当前已提供：
 
+- [`cne6-cluster-portfolios`](cne6-cluster-portfolios/SKILL.md)：按个股 CNE6 风格暴露滚动分簇，配置簇内代表，生成 TopN 投票或完整预测池平均排名股票组合。
+
 - [`ml-strategy-overfitting-audit`](ml-strategy-overfitting-audit/SKILL.md)：机器学习量化策略过拟合检验。
 - [`strategy-n-select`](strategy-n-select/SKILL.md)：重复随机小组 N 选优、开发期选标重合去相关和调仓日全标的/Top-K 投票组合生成。
 - [`optimize-strategy-portfolios`](optimize-strategy-portfolios/SKILL.md)：复现 EMA20 同口径的“残差稳健质量 Top100 → 普通 Beta 最低 N 套 → 冻结等权线性袖套”。
@@ -71,7 +73,18 @@ cp -R alpha-forge/ml-strategy-overfitting-audit ~/.codex/skills/
 使用 $optimize-strategy-portfolios 严格复现 EMA20 低 Beta 流程：使用 Skill 内置且经清单校验的九列日频控制因子收益，先按残差稳健质量分取 Top100，再按家族 full 基准的普通 Beta 选 N，对正式扣费账户做滚动冻结等权线性袖套。不要使用原始 Sharpe 取 Top100，不要加入股票投票、稳健 Beta、去相关或风险簇分支。
 ```
 
-三个 Skill 分工如下：`strategy-n-select` 负责候选锦标赛与股票投票；`optimize-strategy-portfolios` 只负责 EMA20 同口径的质量 Top100、低 Beta N 选择和线性袖套；`ml-strategy-overfitting-audit` 负责模型层的过拟合审计。
+按风格暴露构建股票组合时：
+
+```text
+使用 $cne6-cluster-portfolios 对当前同类型候选策略做 CNE6 六簇组合。
+用过去三年数据，每簇按总风险距离选 3 个代表，簇等权；
+对完整预测池计算加权平均名次，选择前 10 只股票等权，复用正式回测。
+先核对个股暴露与因子收益来源，并冻结参数。
+```
+
+也可指定 `top_n_vote`、`input_top_n=5`、`output_top_n=10`，使用各代表前 5 只股票投票选出前 10 只。
+
+四个 Skill 分工如下：`cne6-cluster-portfolios` 负责风格分簇、簇内代表和股票聚合；`strategy-n-select` 负责候选锦标赛与股票投票；`optimize-strategy-portfolios` 只负责 EMA20 同口径的质量 Top100、低 Beta N 选择和线性袖套；`ml-strategy-overfitting-audit` 负责模型层的过拟合审计。
 
 ## 检验模块
 
@@ -135,6 +148,10 @@ python3 ml-strategy-overfitting-audit/scripts/<script>.py --help
 alpha-forge/
 ├── AGENT.MD
 ├── README.md
+├── cne6-cluster-portfolios/
+│   ├── SKILL.md
+│   ├── agents/openai.yaml
+│   └── references/
 ├── optimize-strategy-portfolios/
 │   ├── SKILL.md
 │   ├── agents/openai.yaml

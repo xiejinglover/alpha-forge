@@ -1,0 +1,4 @@
+interface:
+  display_name: "CNE6 风格分簇组合"
+  short_description: "按风格暴露滚动分簇，配置簇内代表并构建股票投票或平均排名组合"
+  default_prompt: "使用 $cne6-cluster-portfolios 对当前策略仓库做 CNE6 风格分簇组合，冻结代表与参数，复用正式回测并报告数据覆盖和证据边界。"
