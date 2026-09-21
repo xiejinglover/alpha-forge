@@ -6,6 +6,7 @@ Alpha Forge 是一个面向量化研究的 Codex Skills 仓库。每个 Skill �
 
 - [`cne6-cluster-portfolios`](cne6-cluster-portfolios/SKILL.md)：按个股 CNE6 风格暴露滚动分簇，配置簇内代表，生成 TopN 投票或完整预测池平均排名股票组合。
 
+- [`ml-walk-forward-tuning`](ml-walk-forward-tuning/SKILL.md)：在开发期内对训练窗口、模型参数、显式因子集合、标签和交易规则做全量滚动调参，完整报告逐期稳定性与 Pareto 候选，不自动选冠军或读取最终样本外。
 - [`ml-strategy-overfitting-audit`](ml-strategy-overfitting-audit/SKILL.md)：机器学习量化策略过拟合检验。
 - [`strategy-n-select`](strategy-n-select/SKILL.md)：重复随机小组 N 选优、开发期选标重合去相关和调仓日全标的/Top-K 投票组合生成。
 - [`optimize-strategy-portfolios`](optimize-strategy-portfolios/SKILL.md)：复现 EMA20 同口径的“残差稳健质量 Top100 → 普通 Beta 最低 N 套 → 冻结等权线性袖套”。
@@ -84,7 +85,15 @@ cp -R alpha-forge/ml-strategy-overfitting-audit ~/.codex/skills/
 
 也可指定 `top_n_vote`、`input_top_n=5`、`output_top_n=10`，使用各代表前 5 只股票投票选出前 10 只。
 
-四个 Skill 分工如下：`cne6-cluster-portfolios` 负责风格分簇、簇内代表和股票聚合；`strategy-n-select` 负责候选锦标赛与股票投票；`optimize-strategy-portfolios` 只负责 EMA20 同口径的质量 Top100、低 Beta N 选择和线性袖套；`ml-strategy-overfitting-audit` 负责模型层的过拟合审计。
+五个 Skill 分工如下：`cne6-cluster-portfolios` 负责风格分簇、簇内代表和股票聚合；`strategy-n-select` 负责候选锦标赛与股票投票；`optimize-strategy-portfolios` 只负责 EMA20 同口径的质量 Top100、低 Beta N 选择和线性袖套；`ml-walk-forward-tuning` 负责开发期滚动调参；`ml-strategy-overfitting-audit` 负责模型层的过拟合审计。
+
+机器学习开发期滚动调参可明确调用：
+
+```text
+使用 $ml-walk-forward-tuning 检查当前策略仓库的数据和训练入口，确认固定项与搜索项，生成完整笛卡尔积计划，并汇总全部开发期滚动验证结果和 Pareto 候选。不要读取最终样本外，也不要自动选出冠军。
+```
+
+`ml-walk-forward-tuning` 负责事前实验设计与开发期调参；`ml-strategy-overfitting-audit` 负责事后过拟合、时间隔离和选择污染审计。二者都优先复用目标仓库的真实训练与回测入口。
 
 ## 检验模块
 
@@ -148,6 +157,11 @@ python3 ml-strategy-overfitting-audit/scripts/<script>.py --help
 alpha-forge/
 ├── AGENT.MD
 ├── README.md
+├── ml-walk-forward-tuning/
+│   ├── SKILL.md
+│   ├── agents/openai.yaml
+│   ├── references/study-contract.md
+│   └── scripts/
 ├── cne6-cluster-portfolios/
 │   ├── SKILL.md
 │   ├── agents/openai.yaml
@@ -177,6 +191,10 @@ alpha-forge/
 ```bash
 python3 -m unittest discover \
   -s ml-strategy-overfitting-audit/scripts/tests \
+  -v
+
+python3 -m unittest discover \
+  -s ml-walk-forward-tuning/scripts/tests \
   -v
 
 python3 -m unittest discover \

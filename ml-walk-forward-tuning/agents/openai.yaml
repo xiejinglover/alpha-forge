@@ -1,0 +1,5 @@
+interface:
+  display_name: "机器学习滚动调参"
+  short_description: "全量枚举机器学习量化策略并汇总滚动验证稳定性"
+  default_prompt: "使用 $ml-walk-forward-tuning 为当前策略仓库设计并执行开发期滚动调参，完整报告所有指标和 Pareto 候选。"
+
