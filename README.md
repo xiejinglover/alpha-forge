@@ -8,6 +8,7 @@ Alpha Forge 是一个面向量化研究的 Codex Skills 仓库。每个 Skill �
 
 - [`ml-walk-forward-tuning`](ml-walk-forward-tuning/SKILL.md)：在开发期内对训练窗口、模型参数、显式因子集合、标签和交易规则做全量滚动调参，完整报告逐期稳定性与 Pareto 候选，不自动选冠军或读取最终样本外。
 - [`ml-strategy-overfitting-audit`](ml-strategy-overfitting-audit/SKILL.md)：机器学习量化策略过拟合检验。
+- [`rolling-factor-evidence`](rolling-factor-evidence/SKILL.md)：按真实候选池、PIT 因子和与调仓/持有路径一致的成熟标签，滚动检验同周期 RankIC、分组收益、HAC/FDR、经济幅度与稳定性。
 - [`strategy-n-select`](strategy-n-select/SKILL.md)：重复随机小组 N 选优、开发期选标重合去相关和调仓日全标的/Top-K 投票组合生成。
 - [`optimize-strategy-portfolios`](optimize-strategy-portfolios/SKILL.md)：复现 EMA20 同口径的“残差稳健质量 Top100 → 普通 Beta 最低 N 套 → 冻结等权线性袖套”。
 
@@ -85,7 +86,13 @@ cp -R alpha-forge/ml-strategy-overfitting-audit ~/.codex/skills/
 
 也可指定 `top_n_vote`、`input_top_n=5`、`output_top_n=10`，使用各代表前 5 只股票投票选出前 10 只。
 
-五个 Skill 分工如下：`cne6-cluster-portfolios` 负责风格分簇、簇内代表和股票聚合；`strategy-n-select` 负责候选锦标赛与股票投票；`optimize-strategy-portfolios` 只负责 EMA20 同口径的质量 Top100、低 Beta N 选择和线性袖套；`ml-walk-forward-tuning` 负责开发期滚动调参；`ml-strategy-overfitting-audit` 负责模型层的过拟合审计。
+六个 Skill 分工如下：`rolling-factor-evidence` 负责因子边际证据与同周期统计资格；`cne6-cluster-portfolios` 负责风格分簇、簇内代表和股票聚合；`strategy-n-select` 负责候选锦标赛与股票投票；`optimize-strategy-portfolios` 只负责 EMA20 同口径的质量 Top100、低 Beta N 选择和线性袖套；`ml-walk-forward-tuning` 负责开发期滚动调参；`ml-strategy-overfitting-audit` 负责模型层的过拟合审计。
+
+滚动筛选因子边际证据时可明确调用：
+
+```text
+使用 $rolling-factor-evidence 检查当前策略的真实调仓周期、候选池、PIT 因子和成熟标签，先冻结阈值与研究计划，再运行同周期 RankIC、分组收益、HAC/FDR、经济幅度和稳定性检验。不要执行相关去冗余、模型增量或账户回测。
+```
 
 机器学习开发期滚动调参可明确调用：
 
@@ -162,6 +169,11 @@ alpha-forge/
 │   ├── agents/openai.yaml
 │   ├── references/study-contract.md
 │   └── scripts/
+├── rolling-factor-evidence/
+│   ├── SKILL.md
+│   ├── agents/openai.yaml
+│   ├── references/
+│   └── scripts/
 ├── cne6-cluster-portfolios/
 │   ├── SKILL.md
 │   ├── agents/openai.yaml
@@ -195,6 +207,10 @@ python3 -m unittest discover \
 
 python3 -m unittest discover \
   -s ml-walk-forward-tuning/scripts/tests \
+  -v
+
+python3 -m unittest discover \
+  -s rolling-factor-evidence/scripts/tests \
   -v
 
 python3 -m unittest discover \

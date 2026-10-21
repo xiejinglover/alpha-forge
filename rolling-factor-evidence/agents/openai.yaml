@@ -1,0 +1,4 @@
+interface:
+  display_name: "滚动因子证据"
+  short_description: "按真实调仓周期滚动检验因子边际证据与稳定性"
+  default_prompt: "使用 $rolling-factor-evidence 将当前策略的候选池、PIT 因子和同周期成熟标签映射为标准契约，并执行可复算的滚动因子证据研究。"
