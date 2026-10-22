@@ -1,0 +1,3 @@
+interface:
+  display_name: "Adaptive Factor Model Training"
+  short_description: "根据策略和训练数据设计并执行因子后处理、滚动建模与正式回测验证"
