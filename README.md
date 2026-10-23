@@ -9,6 +9,8 @@ Alpha Forge 是一个面向量化研究的 Codex Skills 仓库。每个 Skill �
 - [`ml-walk-forward-tuning`](ml-walk-forward-tuning/SKILL.md)：在开发期内对训练窗口、模型参数、显式因子集合、标签和交易规则做全量滚动调参，完整报告逐期稳定性与 Pareto 候选，不自动选冠军或读取最终样本外。
 - [`ml-strategy-overfitting-audit`](ml-strategy-overfitting-audit/SKILL.md)：机器学习量化策略过拟合检验。
 - [`rolling-factor-evidence`](rolling-factor-evidence/SKILL.md)：按真实候选池、PIT 因子和与调仓/持有路径一致的成熟标签，滚动检验同周期 RankIC、分组收益、HAC/FDR、经济幅度与稳定性。
+- [`adaptive-factor-model-training`](adaptive-factor-model-training/SKILL.md)：根据策略、训练数据量和算力约束，冻结因子后处理、滚动训练、早停、多 Seed 集成及正式账户验证。
+- [`factor-route-ensemble-selection`](factor-route-ensemble-selection/SKILL.md)：搜索改变因子谱系的结构参数，收益盲化压缩滚动路线，并执行固定预测装袋和年度滚动 N 选优。
 - [`strategy-n-select`](strategy-n-select/SKILL.md)：重复随机小组 N 选优、开发期选标重合去相关和调仓日全标的/Top-K 投票组合生成。
 - [`optimize-strategy-portfolios`](optimize-strategy-portfolios/SKILL.md)：复现 EMA20 同口径的“残差稳健质量 Top100 → 普通 Beta 最低 N 套 → 冻结等权线性袖套”。
 
@@ -69,6 +71,14 @@ cp -R alpha-forge/ml-strategy-overfitting-audit ~/.codex/skills/
 先确认开发期和留出集，再分别生成胜出次数加权与唯一策略等权的调仓日投票组合。
 ```
 
+如果候选不是彼此独立的既有策略，而是由因子证据门槛和相关去冗余参数生成的滚动模型路线，应使用独立的路线装袋流程：
+
+```text
+使用 $factor-route-ensemble-selection 读取已冻结的因子证据和模型配方，
+构造结构参数路线库，以年度因子集合距离做收益盲化压缩，
+建立路线等权、年度唯一因子集等权和固定融合基准，再执行年度滚动 N 选优。
+```
+
 对已有正式扣费候选账户进行组合风险优化时：
 
 ```text
@@ -86,7 +96,7 @@ cp -R alpha-forge/ml-strategy-overfitting-audit ~/.codex/skills/
 
 也可指定 `top_n_vote`、`input_top_n=5`、`output_top_n=10`，使用各代表前 5 只股票投票选出前 10 只。
 
-六个 Skill 分工如下：`rolling-factor-evidence` 负责因子边际证据与同周期统计资格；`cne6-cluster-portfolios` 负责风格分簇、簇内代表和股票聚合；`strategy-n-select` 负责候选锦标赛与股票投票；`optimize-strategy-portfolios` 只负责 EMA20 同口径的质量 Top100、低 Beta N 选择和线性袖套；`ml-walk-forward-tuning` 负责开发期滚动调参；`ml-strategy-overfitting-audit` 负责模型层的过拟合审计。
+核心因子建模链路是：`rolling-factor-evidence` 负责同周期因子边际证据，`adaptive-factor-model-training` 负责冻结模型与滚动训练，`factor-route-ensemble-selection` 负责结构路线装袋和年度滚动 N 选优。`strategy-n-select` 继续用于彼此独立的既有候选策略；`ml-walk-forward-tuning` 负责模型或业务参数的开发期滚动调参；其他组合与审计 Skill 保持各自边界。
 
 滚动筛选因子边际证据时可明确调用：
 
@@ -140,7 +150,7 @@ python3 ml-strategy-overfitting-audit/scripts/build_audit_report.py \
 
 ## 脚本
 
-脚本不替代策略训练或交易回测框架。ML 审计与 N 选优脚本只依赖 Python 标准库；策略组合优化脚本额外依赖 NumPy。
+脚本不替代策略训练或交易回测框架。ML 审计与独立策略 N 选优脚本只依赖 Python 标准库；策略组合优化脚本额外依赖 NumPy；因子路线装袋脚本依赖 NumPy、SciPy、pandas 和 PyArrow，版本见该 Skill 的 `scripts/requirements.txt`。
 
 | 脚本 | 用途 |
 |---|---|
@@ -151,6 +161,8 @@ python3 ml-strategy-overfitting-audit/scripts/build_audit_report.py \
 | `run_portfolio_optimization.py` | 使用内置控制因子运行质量保护、多类 Beta、等权组合和滚动冻结评估 |
 | `validate_bundled_factor_returns.py` | 校验内置因子收益的哈希、日期、字段与数值完整性 |
 | `build_portfolio_report.py` | 验证冻结产物哈希并重建组合审计报告 |
+| `build_factor_route_plan.py` | 展开结构参数网格，生成可行性报告并冻结路线研究计划 |
+| `run_factor_route_study.py` | 执行收益盲化路线压缩、固定预测装袋、年度滚动 N 选优和 HAC/FDR 汇总 |
 
 查看任一脚本的输入字段和命令行选项：
 
@@ -170,6 +182,16 @@ alpha-forge/
 │   ├── references/study-contract.md
 │   └── scripts/
 ├── rolling-factor-evidence/
+│   ├── SKILL.md
+│   ├── agents/openai.yaml
+│   ├── references/
+│   └── scripts/
+├── adaptive-factor-model-training/
+│   ├── SKILL.md
+│   ├── agents/openai.yaml
+│   ├── references/
+│   └── scripts/
+├── factor-route-ensemble-selection/
 │   ├── SKILL.md
 │   ├── agents/openai.yaml
 │   ├── references/
@@ -215,6 +237,10 @@ python3 -m unittest discover \
 
 python3 -m unittest discover \
   -s strategy-n-select/scripts/tests \
+  -v
+
+python3 -m unittest discover \
+  -s factor-route-ensemble-selection/scripts/tests \
   -v
 
 python3 -m unittest discover \

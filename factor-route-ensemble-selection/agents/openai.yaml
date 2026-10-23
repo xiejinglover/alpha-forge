@@ -1,0 +1,4 @@
+interface:
+  display_name: "因子路线装袋与滚动选优"
+  short_description: "构造并压缩滚动因子路线，执行固定装袋和年度N选优"
+  default_prompt: "使用 $factor-route-ensemble-selection 为当前策略构造结构参数路线库，进行收益盲化压缩、固定预测装袋和年度滚动 N 选优。"
